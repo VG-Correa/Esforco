@@ -135,6 +135,25 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
         }
     }
 
+    public IReadOnlyList<IntervaloDeEsforco> ListarEmSegundoPlano()
+    {
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = """
+                SELECT id, programa, titulo, contexto, escritorio, plano, periodo, sessao, item, tipo_item, minimizada, segundo_plano, retomado, inicio, fim
+                FROM intervalos
+                WHERE fim IS NULL AND segundo_plano = 1
+                ORDER BY id ASC;
+                """;
+            using var leitor = comando.ExecuteReader();
+            var lista = new List<IntervaloDeEsforco>();
+            while (leitor.Read())
+                lista.Add(Ler(leitor));
+            return lista;
+        }
+    }
+
     public void DefinirSegundoPlano(IntervaloDeEsforco intervalo, bool emSegundoPlano)
     {
         ArgumentNullException.ThrowIfNull(intervalo);

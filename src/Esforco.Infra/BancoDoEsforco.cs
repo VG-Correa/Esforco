@@ -8,7 +8,8 @@ public static class BancoDoEsforco
     /// <summary>
     /// Tabelas do vínculo manual. São só criadas, se faltarem: nenhuma tabela que já existia é alterada
     /// e nenhum intervalo gravado é mexido. enderecos_intervalo guarda o endereço da aba apenas dos
-    /// intervalos que casam com um vínculo por endereço.
+    /// intervalos que casam com um vínculo por endereço. contagens_janela guarda como cada janela ou
+    /// programa conta o tempo: só em foco ou enquanto estiver aberta.
     /// </summary>
     public const string TabelasDeVinculos = """
         CREATE TABLE IF NOT EXISTS categorias (
@@ -37,6 +38,14 @@ public static class BancoDoEsforco
         CREATE TABLE IF NOT EXISTS configuracoes (
             chave TEXT PRIMARY KEY,
             valor TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS contagens_janela (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alcance INTEGER NOT NULL,
+            programa TEXT NOT NULL,
+            titulo TEXT NOT NULL,
+            modo INTEGER NOT NULL,
+            salva_em TEXT NOT NULL
         );
         """;
 

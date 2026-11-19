@@ -64,7 +64,7 @@ public sealed partial class ServicoDeEsforco
             _emLeitura = false;
             var agora = _relogio.Agora();
             FecharAberto(agora);
-            FecharReuniaoEmSegundoPlano(agora);
+            FecharSegundoPlano(agora);
             _ultimoPulso = null;
         }
     }
@@ -75,7 +75,7 @@ public sealed partial class ServicoDeEsforco
         {
             var agora = _relogio.Agora();
             FecharAberto(agora);
-            FecharReuniaoEmSegundoPlano(agora);
+            FecharSegundoPlano(agora);
             _suspenso = true;
             _proximaReuniaoRetomada = true;
             _ultimoPulso = agora;
@@ -129,6 +129,19 @@ public sealed partial class ServicoDeEsforco
                 reuniaoMinimizada = null;
             }
 
+            IReadOnlyList<JanelaAberta>? abertas = null;
+            if (HaJanelaQueContaAberta())
+            {
+                try
+                {
+                    abertas = _leitor.LerAbertas();
+                }
+                catch (Exception)
+                {
+                    abertas = null;
+                }
+            }
+
             lock (_gate)
             {
                 if (!_emLeitura || _suspenso || amostra is null)
@@ -154,88 +167,123 @@ public sealed partial class ServicoDeEsforco
                     conversa = conversa[..200];
                 var local = InterpretadorDePainelSplitC.Interpretar(endereco);
                 var nome = NomeDoPrograma(amostra.Programa, local, titulo, endereco);
-                if (EstaPausado(nome))
-                {
-                    FecharAberto(agora);
-                    var fundo = _repositorio.ObterReuniaoEmSegundoPlano();
-                    if (fundo is not null && string.Equals(fundo.Programa, nome, StringComparison.Ordinal))
-                        Fechar(fundo, agora);
-                    return;
-                }
+                var pausado = EstaPausado(nome);
+                if (pausado)
+                    FecharOQueForDe(nome, agora);
 
-                var reuniao = ReuniaoAberta();
-                var viu = ViuReuniao(reuniao, titulo, reuniaoMinimizada);
-                if (reuniao is not null && !viu)
-                {
-                    var vista = _ultimaVistaDaReuniao ?? reuniao.Inicio;
-                    var outra = OutraReuniao(reuniao, titulo);
-                    if (outra || agora - vista > ContinuidadeDeReuniao.Folga)
-                    {
-                        Fechar(reuniao, outra ? agora : vista);
-                        reuniao = null;
-                        if (!outra)
-                            _ultimaVistaDaReuniao = null;
-                    }
-                }
-
-                if (reuniao is not null && viu)
-                {
-                    _ultimaVistaDaReuniao = agora;
-                    if (reuniao.Id is long idVisto)
-                        _repositorio.MarcarVisto(idVisto, agora);
-                }
-
-                if (reuniao is not null && FrenteMantemReuniao(reuniao, titulo))
-                {
-                    if (reuniao.EmSegundoPlano)
-                        _repositorio.DefinirSegundoPlano(reuniao, false);
-
-                    var outro = _repositorio.ObterAberto();
-                    if (outro is not null && outro.Id != reuniao.Id)
-                        Fechar(outro, agora);
-                    return;
-                }
-
-                if (reuniao is not null && !reuniao.EmSegundoPlano)
-                    _repositorio.DefinirSegundoPlano(reuniao, true);
-
-                var aberto = _repositorio.ObterAberto();
-                if (aberto is not null && MesmaAtividade(aberto, nome, titulo, endereco, conversa, amostra.Minimizada, local))
-                {
-                    if (aberto.Id is long id)
-                        _repositorio.MarcarVisto(id, agora);
-                    return;
-                }
-
-                if (aberto is not null)
-                    FecharAberto(agora);
-
-                var novo = local is null
-                    ? IntervaloDeEsforco.Abrir(
-                        nome,
-                        titulo,
-                        Contexto(titulo, endereco, conversa),
-                        Escritorio(titulo, endereco, conversa),
-                        amostra.Minimizada,
-                        agora)
-                    : IntervaloDeEsforco.AbrirPainel(titulo, local, amostra.Minimizada, agora);
-                if (_proximaReuniaoRetomada && InterpretadorDeReuniao.Ler(titulo) is not null)
-                {
-                    novo.MarcarRetomado();
-                    _proximaReuniaoRetomada = false;
-                }
-
-                _repositorio.Adicionar(novo);
-                if (local is null && endereco.Length > 0)
-                    _vinculos?.GuardarEnderecoSeVinculado(novo, endereco);
-                if (InterpretadorDeReuniao.Ler(titulo) is not null)
-                    _ultimaVistaDaReuniao = agora;
+                var regras = RegrasDeContagem();
+                var frente = new Frente(nome, titulo, endereco, conversa, amostra.Minimizada, local, pausado);
+                RegistrarFrente(frente, reuniaoMinimizada, regras, agora);
+                AcompanharAbertas(regras, abertas, (amostra.Programa ?? "").Trim(), titulo, agora);
             }
         }
         finally
         {
             Interlocked.Exchange(ref _ocupado, 0);
         }
+    }
+
+    private void RegistrarFrente(
+        Frente frente,
+        AmostraDeJanela? reuniaoMinimizada,
+        IReadOnlyList<ContagemDeJanela> regras,
+        DateTimeOffset agora)
+    {
+        // Programa pausado na frente não vira registro nem conta como a reunião na frente,
+        // mas o que conta enquanto aberto segue contando atrás dele.
+        var titulo = frente.Pausado ? "" : frente.Titulo;
+        var reuniao = ReuniaoAberta(regras);
+        var viu = ViuReuniao(reuniao, titulo, reuniaoMinimizada);
+        if (reuniao is not null && !viu)
+        {
+            var vista = _ultimaVistaDaReuniao ?? reuniao.Inicio;
+            var outra = OutraReuniao(reuniao, titulo);
+            if (outra || agora - vista > ContinuidadeDeReuniao.Folga)
+            {
+                Fechar(reuniao, outra ? agora : vista);
+                reuniao = null;
+                if (!outra)
+                    _ultimaVistaDaReuniao = null;
+            }
+        }
+
+        if (reuniao is not null && viu)
+        {
+            _ultimaVistaDaReuniao = agora;
+            if (reuniao.Id is long idVisto)
+                _repositorio.MarcarVisto(idVisto, agora);
+        }
+
+        if (reuniao is not null && FrenteMantemReuniao(reuniao, titulo))
+        {
+            var outro = _repositorio.ObterAberto();
+            if (outro is not null && outro.Id != reuniao.Id)
+                SairDaFrente(outro, null, regras, agora);
+
+            if (reuniao.EmSegundoPlano)
+                _repositorio.DefinirSegundoPlano(reuniao, false);
+            return;
+        }
+
+        if (reuniao is not null && !reuniao.EmSegundoPlano)
+            _repositorio.DefinirSegundoPlano(reuniao, true);
+
+        var aberto = _repositorio.ObterAberto();
+        if (frente.Pausado)
+        {
+            if (aberto is not null)
+                SairDaFrente(aberto, null, regras, agora);
+            return;
+        }
+
+        if (aberto is not null && MesmaAtividade(aberto, frente))
+        {
+            if (aberto.Id is long id)
+            {
+                _repositorio.MarcarVisto(id, agora);
+                _vistas[id] = agora;
+            }
+
+            return;
+        }
+
+        var regra = RegraQueContaAberta(frente.Programa, frente.Titulo, regras);
+        if (aberto is not null)
+            SairDaFrente(aberto, regra, regras, agora);
+
+        if (regra is not null && VoltarParaAFrente(regra, frente, regras, agora))
+            return;
+
+        var novo = frente.Local is null
+            ? IntervaloDeEsforco.Abrir(
+                frente.Programa,
+                frente.Titulo,
+                Contexto(frente.Titulo, frente.Endereco, frente.Conversa),
+                Escritorio(frente.Titulo, frente.Endereco, frente.Conversa),
+                frente.Minimizada,
+                agora)
+            : IntervaloDeEsforco.AbrirPainel(frente.Titulo, frente.Local, frente.Minimizada, agora);
+        var ehReuniao = InterpretadorDeReuniao.Ler(frente.Titulo) is not null;
+        if (ehReuniao && _proximaReuniaoRetomada)
+        {
+            novo.MarcarRetomado();
+            _proximaReuniaoRetomada = false;
+        }
+
+        if (ehReuniao && ContagemDaJanela.Achar(frente.Programa, frente.Titulo, regras).Modo == ModoDeContagem.SoEmFoco)
+        {
+            // Reunião que conta só em foco: cada trecho fica separado, sem emendar o tempo do meio.
+            novo.MarcarRetomado();
+            _proximaReuniaoRetomada = true;
+        }
+
+        _repositorio.Adicionar(novo);
+        if (novo.Id is long criado)
+            _vistas[criado] = agora;
+        if (frente.Local is null && frente.Endereco.Length > 0)
+            _vinculos?.GuardarEnderecoSeVinculado(novo, frente.Endereco);
+        if (ehReuniao)
+            _ultimaVistaDaReuniao = agora;
     }
 
     public void AlternarOculto(string programa) =>
@@ -452,16 +500,19 @@ public sealed partial class ServicoDeEsforco
         }
     }
 
-    private void FecharSeFor(string programa)
+    private void FecharSeFor(string programa) => FecharOQueForDe(programa, _relogio.Agora());
+
+    private void FecharOQueForDe(string programa, DateTimeOffset agora)
     {
         var aberto = _repositorio.ObterAberto();
-        var agora = _relogio.Agora();
         if (aberto is not null && string.Equals(aberto.Programa, programa, StringComparison.Ordinal))
-            FecharAberto(agora);
+            Fechar(aberto, agora);
 
-        var fundo = _repositorio.ObterReuniaoEmSegundoPlano();
-        if (fundo is not null && string.Equals(fundo.Programa, programa, StringComparison.Ordinal))
-            Fechar(fundo, agora);
+        foreach (var fundo in _repositorio.ListarEmSegundoPlano())
+        {
+            if (string.Equals(fundo.Programa, programa, StringComparison.Ordinal))
+                Fechar(fundo, agora);
+        }
     }
 
     private bool EstaPausado(string programa) =>
@@ -501,6 +552,16 @@ public sealed partial class ServicoDeEsforco
 
         return ResolvedorDeEscritorio.Resolver(titulo, _regras.Carregar());
     }
+
+    private static bool MesmaAtividade(IntervaloDeEsforco aberto, Frente frente) =>
+        MesmaAtividade(
+            aberto,
+            frente.Programa,
+            frente.Titulo,
+            frente.Endereco,
+            frente.Conversa,
+            frente.Minimizada,
+            frente.Local);
 
     private static bool MesmaAtividade(
         IntervaloDeEsforco aberto,
@@ -549,17 +610,14 @@ public sealed partial class ServicoDeEsforco
         return aberto.Continua(programa, titulo, minimizada);
     }
 
-    private IntervaloDeEsforco? ReuniaoAberta()
+    private IntervaloDeEsforco? ReuniaoAberta(IReadOnlyList<ContagemDeJanela> regras)
     {
-        var fundo = _repositorio.ObterReuniaoEmSegundoPlano();
-        if (fundo is not null && InterpretadorDeReuniao.Ler(fundo.Titulo) is not null)
+        var fundo = _repositorio.ListarEmSegundoPlano().LastOrDefault(item => ReuniaoQueContaAberta(item, regras));
+        if (fundo is not null)
             return fundo;
 
         var aberto = _repositorio.ObterAberto();
-        if (aberto is not null && InterpretadorDeReuniao.Ler(aberto.Titulo) is not null)
-            return aberto;
-
-        return null;
+        return aberto is not null && ReuniaoQueContaAberta(aberto, regras) ? aberto : null;
     }
 
     private static bool ViuReuniao(IntervaloDeEsforco? reuniao, string titulo, AmostraDeJanela? minimizada)
@@ -589,7 +647,7 @@ public sealed partial class ServicoDeEsforco
         if (_ultimoPulso is DateTimeOffset anterior && agora - anterior > FolgaDeAusencia)
         {
             FecharAberto(anterior);
-            FecharReuniaoEmSegundoPlano(anterior);
+            FecharSegundoPlano(anterior);
             _proximaReuniaoRetomada = true;
         }
 
@@ -605,10 +663,9 @@ public sealed partial class ServicoDeEsforco
         Fechar(aberto, agora);
     }
 
-    private void FecharReuniaoEmSegundoPlano(DateTimeOffset agora)
+    private void FecharSegundoPlano(DateTimeOffset agora)
     {
-        var fundo = _repositorio.ObterReuniaoEmSegundoPlano();
-        if (fundo is not null)
+        foreach (var fundo in _repositorio.ListarEmSegundoPlano())
             Fechar(fundo, agora);
     }
 
@@ -616,5 +673,7 @@ public sealed partial class ServicoDeEsforco
     {
         intervalo.Fechar(agora);
         _repositorio.SalvarFechamento(intervalo);
+        if (intervalo.Id is long id)
+            _vistas.Remove(id);
     }
 }

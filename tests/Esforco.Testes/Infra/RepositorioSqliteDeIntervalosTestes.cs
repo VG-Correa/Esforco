@@ -58,6 +58,35 @@ public sealed class RepositorioSqliteDeIntervalosTestes : IDisposable
     }
 
     [Fact]
+    public void Lista_tudo_o_que_conta_sem_estar_na_frente()
+    {
+        var inicio = new DateTimeOffset(2026, 11, 17, 8, 0, 0, TimeSpan.FromHours(-3));
+
+        using var repositorio = new RepositorioSqliteDeIntervalos(Banco);
+        var reuniao = IntervaloDeEsforco.Abrir("Google Chrome", "Meet: vct <> splitc - Google Chrome", "", "", false, inicio);
+        var discord = IntervaloDeEsforco.Abrir("Discord", "amigos - Discord", "amigos", "", true, inicio.AddMinutes(1), emSegundoPlano: true);
+        var fechado = IntervaloDeEsforco.Abrir("Spotify", "Spotify Premium", "", "", false, inicio.AddMinutes(2), emSegundoPlano: true);
+        var frente = IntervaloDeEsforco.Abrir("Word", "notas.docx - Word", "notas.docx", "", false, inicio.AddMinutes(3));
+        repositorio.Adicionar(reuniao);
+        repositorio.Adicionar(discord);
+        repositorio.Adicionar(fechado);
+        repositorio.Adicionar(frente);
+        repositorio.DefinirSegundoPlano(reuniao, true);
+        fechado.Fechar(inicio.AddMinutes(4));
+        repositorio.SalvarFechamento(fechado);
+
+        var fundos = repositorio.ListarEmSegundoPlano();
+
+        Assert.Equal(["Google Chrome", "Discord"], fundos.Select(item => item.Programa));
+        Assert.All(fundos, item => Assert.True(item.EmSegundoPlano));
+        Assert.True(fundos[1].Minimizada);
+        Assert.Equal("Word", repositorio.ObterAberto()!.Programa);
+
+        repositorio.DefinirSegundoPlano(fundos[1], false);
+        Assert.Equal("Google Chrome", Assert.Single(repositorio.ListarEmSegundoPlano()).Programa);
+    }
+
+    [Fact]
     public void Lista_em_ordem_cronologica()
     {
         var inicio = new DateTimeOffset(2026, 11, 17, 8, 0, 0, TimeSpan.FromHours(-3));

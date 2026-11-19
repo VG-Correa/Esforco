@@ -531,6 +531,55 @@ public class ServicoDeEsforcoTestes
     }
 
     [Fact]
+    public void Reuniao_segue_contando_quando_um_programa_pausado_vem_para_a_frente()
+    {
+        var (servico, leitor, repositorio, relogio, _) = Cenario.Criar();
+        var titulo = "Meet: vct <> splitc - Google Chrome";
+        servico.AlternarPausado("Esforço");
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", titulo, false);
+        servico.Iniciar();
+        var id = Assert.Single(repositorio.Listar()).Id;
+
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
+        leitor.Proxima = new AmostraDeJanela("Esforço", "Esforço", false, Propria: true);
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(2));
+
+        var reuniao = Assert.Single(repositorio.Listar());
+        Assert.Equal(id, reuniao.Id);
+        Assert.Null(reuniao.Fim);
+        Assert.True(reuniao.EmSegundoPlano);
+
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", titulo, false);
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
+
+        reuniao = Assert.Single(repositorio.Listar());
+        Assert.Equal(id, reuniao.Id);
+        Assert.Null(reuniao.Fim);
+        Assert.False(reuniao.EmSegundoPlano);
+        Assert.Equal(TimeSpan.FromMinutes(4), reuniao.DuracaoAte(relogio.Instante));
+    }
+
+    [Fact]
+    public void Pausar_o_programa_da_reuniao_encerra_a_reuniao()
+    {
+        var (servico, leitor, repositorio, relogio, _) = Cenario.Criar();
+        var titulo = "Meet: vct <> splitc - Google Chrome";
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", titulo, false);
+        servico.Iniciar();
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
+        leitor.Proxima = new AmostraDeJanela("Word", "notas.docx - Word", false);
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
+        var pausa = relogio.Instante;
+
+        servico.AlternarPausado("Google Chrome");
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
+
+        var reuniao = Assert.Single(repositorio.Listar(), item => item.Programa == "Google Chrome");
+        Assert.Equal(pausa, reuniao.Fim);
+        Assert.Null(Assert.Single(repositorio.Listar(), item => item.Programa == "Word").Fim);
+    }
+
+    [Fact]
     public void Chatwoot_grava_o_escritorio_do_chat_aberto()
     {
         var (servico, leitor, repositorio, relogio, _) = Cenario.Criar();

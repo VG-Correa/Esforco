@@ -40,4 +40,13 @@ public interface IRepositorioDeVinculos
     string? LerConfiguracao(string chave);
 
     void GravarConfiguracao(string chave, string valor);
+
+    IReadOnlyList<ContagemDeJanela> ListarContagens();
+
+    /// <summary>
+    /// Com Id zero, cria a regra de contagem. Com Id, troca o modo da que já existe.
+    /// </summary>
+    ContagemDeJanela SalvarContagem(ContagemDeJanela contagem);
+
+    void ExcluirContagem(long id);
 }

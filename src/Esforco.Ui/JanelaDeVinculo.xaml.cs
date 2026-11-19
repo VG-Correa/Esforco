@@ -8,12 +8,12 @@ using Esforco.Dominio;
 namespace Esforco.Ui;
 
 /// <summary>
-/// A janelinha que liga um programa, uma janela ou uma aba a um escritório.
-/// Ela só mostra e grava: não lê nem mexe em nenhuma outra janela.
+/// A janelinha que liga um programa, uma janela ou uma aba a um escritório e que guarda como a janela
+/// conta o tempo. Ela só mostra e grava: não lê nem mexe em nenhuma outra janela.
 /// </summary>
 public partial class JanelaDeVinculo : Window
 {
-    public const string TituloDaJanela = "Vincular a um escritório";
+    public const string TituloDaJanela = "Escritório e contagem da janela";
 
     private static readonly CultureInfo Cultura = CultureInfo.GetCultureInfo("pt-BR");
 
@@ -23,6 +23,7 @@ public partial class JanelaDeVinculo : Window
     private readonly AlcanceDoVinculo? _alcanceSugerido;
     private readonly List<ItemDeEscritorio> _escritorios = [];
     private FormularioDeVinculo? _formulario;
+    private FormularioDeContagem? _contagem;
     private string? _escolhido;
     private string _diaPadrao = "";
     private string _horaPadrao = "";
@@ -59,6 +60,7 @@ public partial class JanelaDeVinculo : Window
         };
         SizeChanged += (_, _) => ManterNaTela();
         Preencher(formulario);
+        PreencherContagem(formulario is null ? null : origem);
     }
 
     public bool Salvou { get; private set; }
@@ -158,10 +160,94 @@ public partial class JanelaDeVinculo : Window
         CarregarCategorias(formulario);
         PreencherAlcance(formulario);
         PreencherValidade(formulario);
-        BotaoSalvar.Content = emEdicao ? "Salvar" : "Vincular";
         Aviso.Text = "";
         _pronta = true;
         AjustarOpcoes();
+    }
+
+    /// <summary>
+    /// Mostra como a janela da frente, ou a do registro clicado, conta o tempo: o que está salvo ou o padrão.
+    /// A tela de vínculos salvos não tem janela por trás, então lá a escolha não aparece.
+    /// </summary>
+    private void PreencherContagem(AlvoDeVinculo? origem)
+    {
+        if (origem is null || origem.Programa.Trim().Length == 0)
+        {
+            _contagem = null;
+            PainelDaContagem.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var contagem = _vinculos.FormularioDaContagem(origem.Programa, origem.Titulo);
+        _contagem = null;
+        TextoDoProgramaDaContagem.Text = $"o programa inteiro ({contagem.Programa})";
+        ContagemPelaJanela.IsEnabled = contagem.PodeJanela;
+        ContagemPelaJanela.IsChecked = contagem.Alcance == AlcanceDaContagem.Janela;
+        ContagemPeloPrograma.IsChecked = contagem.Alcance == AlcanceDaContagem.Programa;
+        MarcarModo(contagem.Modo);
+        PainelDaContagem.Visibility = Visibility.Visible;
+        _contagem = contagem;
+        MostrarSituacaoDaContagem();
+    }
+
+    /// <summary>
+    /// Ao trocar entre a janela e o programa inteiro, mostra o que já está salvo para aquele alcance.
+    /// Sem nada salvo lá, a escolha marcada fica como a pessoa deixou.
+    /// </summary>
+    private void AoTrocarAlcanceDaContagem(object sender, RoutedEventArgs e)
+    {
+        if (_contagem is null)
+            return;
+
+        if (_contagem.ModoSalvoEm(AlcanceDaContagemEscolhido()) is ModoDeContagem salvo)
+            MarcarModo(salvo);
+        MostrarSituacaoDaContagem();
+    }
+
+    private void MostrarSituacaoDaContagem()
+    {
+        if (_contagem is null)
+            return;
+
+        var alcance = AlcanceDaContagemEscolhido();
+        var daJanela = alcance == AlcanceDaContagem.Janela;
+        string texto;
+        if (_contagem.ModoSalvoEm(alcance) is not null)
+            texto = daJanela ? "Escolha salva para esta janela." : "Escolha salva para o programa inteiro.";
+        else if (daJanela && _contagem.ModoDoPrograma is not null)
+            texto = "Nada salvo só para esta janela: hoje vale a escolha do programa inteiro.";
+        else if (!daJanela && _contagem.ModoDaJanela is not null)
+            texto = "Nada salvo para o programa inteiro: só esta janela tem escolha salva.";
+        else if (_contagem.Reuniao)
+            texto = "Padrão da reunião. A contagem pode ser salva sem escolher escritório.";
+        else
+            texto = "Padrão. A contagem pode ser salva sem escolher escritório.";
+
+        SituacaoDaContagem.Text = texto;
+    }
+
+    private void MarcarModo(ModoDeContagem modo)
+    {
+        ContagemEmFoco.IsChecked = modo == ModoDeContagem.SoEmFoco;
+        ContagemAberta.IsChecked = modo == ModoDeContagem.EnquantoAberta;
+    }
+
+    private AlcanceDaContagem AlcanceDaContagemEscolhido() =>
+        ContagemPeloPrograma.IsChecked == true ? AlcanceDaContagem.Programa : AlcanceDaContagem.Janela;
+
+    /// <summary>
+    /// Grava a escolha de contagem e diz se algo mudou. Nada é gravado se a escolha é a que já valia.
+    /// </summary>
+    private bool SalvarContagem()
+    {
+        if (_contagem is null)
+            return false;
+
+        return _vinculos.SalvarContagem(
+            _contagem.Programa,
+            _contagem.Titulo,
+            AlcanceDaContagemEscolhido(),
+            ContagemAberta.IsChecked == true ? ModoDeContagem.EnquantoAberta : ModoDeContagem.SoEmFoco);
     }
 
     /// <summary>
@@ -179,7 +265,7 @@ public partial class JanelaDeVinculo : Window
         }
         else if (formulario.Copia)
         {
-            texto = "Campos do último vínculo desta janela, que já terminou. Vincular cria outro e o antigo fica como está.";
+            texto = "Campos do último vínculo desta janela, que já terminou. Salvar cria outro e o antigo fica como está.";
         }
 
         Situacao.Text = texto;
@@ -375,7 +461,17 @@ public partial class JanelaDeVinculo : Window
 
         if (ListaDeEscritorios.SelectedItem is not ItemDeEscritorio escritorio)
         {
-            Aviso.Text = "Escolha o escritório.";
+            // Sem escritório, só a contagem é salva, e só se a pessoa mudou alguma coisa nela.
+            if (!SalvarContagem())
+            {
+                Aviso.Text = _contagem is null
+                    ? "Escolha o escritório."
+                    : "Escolha o escritório, ou mude a contagem do tempo para salvar só ela.";
+                return;
+            }
+
+            Salvou = true;
+            Fechar();
             return;
         }
 
@@ -412,6 +508,7 @@ public partial class JanelaDeVinculo : Window
             return;
         }
 
+        SalvarContagem();
         Salvou = true;
         Fechar();
     }

@@ -81,6 +81,43 @@ public sealed class RepositorioSqliteDeVinculosTestes : IDisposable
     }
 
     [Fact]
+    public void Grava_troca_e_exclui_a_contagem_da_janela_sem_tocar_nas_tabelas_antigas()
+    {
+        var inicio = new DateTimeOffset(2026, 11, 17, 9, 0, 0, TimeSpan.FromHours(-3));
+        // Fica aberto até o fim, como no programa: a conferência só de leitura divide o cache com ele.
+        using var intervalos = new RepositorioSqliteDeIntervalos(Banco);
+        var antigo = IntervaloDeEsforco.Abrir("Discord", "amigos - Discord", "amigos", "", false, inicio);
+        intervalos.Adicionar(antigo);
+        antigo.Fechar(inicio.AddMinutes(30));
+        intervalos.SalvarFechamento(antigo);
+
+        var esquemaAntes = Esquema();
+        var linhasAntes = Linhas();
+        using (var repositorio = new RepositorioSqliteDeVinculos(Banco))
+        {
+            var servico = new ServicoDeVinculos(repositorio, new RelogioManual { Instante = inicio.AddHours(1) });
+            Assert.True(servico.SalvarContagem("Discord", "amigos - Discord", AlcanceDaContagem.Janela, ModoDeContagem.EnquantoAberta));
+            Assert.True(servico.SalvarContagem("Discord", "amigos - Discord", AlcanceDaContagem.Programa, ModoDeContagem.EnquantoAberta));
+            Assert.True(servico.SalvarContagem("Discord", "amigos - Discord", AlcanceDaContagem.Janela, ModoDeContagem.SoEmFoco));
+            Assert.True(servico.SalvarContagem("Word", "notas.docx - Word", AlcanceDaContagem.Programa, ModoDeContagem.EnquantoAberta));
+            Assert.True(servico.SalvarContagem("Word", "notas.docx - Word", AlcanceDaContagem.Programa, ModoDeContagem.SoEmFoco));
+        }
+
+        using var leitura = new RepositorioSqliteDeVinculos(Banco);
+        var contagens = leitura.ListarContagens();
+        Assert.Equal(2, contagens.Count);
+        Assert.Equal(
+            new ContagemDeJanela(contagens[0].Id, AlcanceDaContagem.Janela, "Discord", "amigos - Discord", ModoDeContagem.SoEmFoco, inicio.AddHours(1)),
+            contagens[0]);
+        Assert.Equal(
+            new ContagemDeJanela(contagens[1].Id, AlcanceDaContagem.Programa, "Discord", "", ModoDeContagem.EnquantoAberta, inicio.AddHours(1)),
+            contagens[1]);
+        Assert.True(contagens[0].Id > 0 && contagens[1].Id > contagens[0].Id);
+        Assert.Equal(esquemaAntes, Esquema());
+        Assert.Equal(linhasAntes, Linhas());
+    }
+
+    [Fact]
     public void Excluir_categoria_em_uso_troca_ou_retira_a_categoria_dos_vinculos()
     {
         using var repositorio = new RepositorioSqliteDeVinculos(Banco);

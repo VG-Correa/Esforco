@@ -8,6 +8,11 @@ public interface IRepositorioDeIntervalos
 
     IntervaloDeEsforco? ObterReuniaoEmSegundoPlano();
 
+    /// <summary>
+    /// Tudo o que está contando sem estar na frente: a reunião e as janelas que contam enquanto abertas.
+    /// </summary>
+    IReadOnlyList<IntervaloDeEsforco> ListarEmSegundoPlano();
+
     void DefinirSegundoPlano(IntervaloDeEsforco intervalo, bool emSegundoPlano);
 
     void Adicionar(IntervaloDeEsforco intervalo);

@@ -17,6 +17,7 @@ public sealed class ServicoDeVinculos
     private readonly IRelogio _relogio;
     private readonly object _gate = new();
     private ContextoDeVinculos? _contexto;
+    private IReadOnlyList<ContagemDeJanela>? _contagens;
 
     public ServicoDeVinculos(IRepositorioDeVinculos repositorio, IRelogio relogio)
     {
@@ -234,6 +235,43 @@ public sealed class ServicoDeVinculos
 
             _repositorio.ManterEnderecos(intervalos);
             _contexto = null;
+        }
+    }
+
+    /// <summary>
+    /// As regras de contagem. Ficam em memória até a próxima gravação, porque a leitura pede a cada segundo.
+    /// </summary>
+    public IReadOnlyList<ContagemDeJanela> Contagens()
+    {
+        lock (_gate)
+            return _contagens ??= _repositorio.ListarContagens();
+    }
+
+    /// <summary>
+    /// Como a escolha de contagem abre na janelinha para essa janela: o que está salvo, ou o padrão.
+    /// </summary>
+    public FormularioDeContagem FormularioDaContagem(string? programa, string? titulo) =>
+        FormularioDeContagem.Montar(programa, titulo, Contagens());
+
+    /// <summary>
+    /// Guarda como a janela, ou o programa inteiro, conta o tempo daqui para a frente.
+    /// Devolve se algo mudou. Nenhum registro antigo é mexido.
+    /// </summary>
+    public bool SalvarContagem(string? programa, string? titulo, AlcanceDaContagem alcance, ModoDeContagem modo)
+    {
+        lock (_gate)
+        {
+            var plano = ContagemDaJanela.Decidir(programa, titulo, alcance, modo, Contagens(), _relogio.Agora());
+            if (plano.Acao == AcaoDeContagem.Nada || plano.Regra is null)
+                return false;
+
+            if (plano.Acao == AcaoDeContagem.Remover)
+                _repositorio.ExcluirContagem(plano.Regra.Id);
+            else
+                _repositorio.SalvarContagem(plano.Regra);
+
+            _contagens = null;
+            return true;
         }
     }
 

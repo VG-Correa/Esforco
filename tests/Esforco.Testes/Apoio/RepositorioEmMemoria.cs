@@ -28,6 +28,12 @@ internal sealed class RepositorioEmMemoria : IRepositorioDeIntervalos
             return _itens.LastOrDefault(item => item.Fim is null && item.EmSegundoPlano);
     }
 
+    public IReadOnlyList<IntervaloDeEsforco> ListarEmSegundoPlano()
+    {
+        lock (_trava)
+            return _itens.Where(item => item.Fim is null && item.EmSegundoPlano).OrderBy(item => item.Id).ToList();
+    }
+
     public void DefinirSegundoPlano(IntervaloDeEsforco intervalo, bool emSegundoPlano)
     {
         ArgumentNullException.ThrowIfNull(intervalo);

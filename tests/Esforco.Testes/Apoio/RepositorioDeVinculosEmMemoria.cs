@@ -9,6 +9,8 @@ internal sealed class RepositorioDeVinculosEmMemoria : IRepositorioDeVinculos
     private readonly List<VinculoDeEscritorio> _vinculos = [];
     private readonly Dictionary<long, string> _enderecos = [];
     private readonly Dictionary<string, string> _configuracoes = new(StringComparer.Ordinal);
+    private readonly List<ContagemDeJanela> _contagens = [];
+    private long _proximaContagem = 1;
     private long _proximaCategoria = 1;
     private long _proximoVinculo = 1;
 
@@ -71,4 +73,23 @@ internal sealed class RepositorioDeVinculosEmMemoria : IRepositorioDeVinculos
         _configuracoes.TryGetValue(chave, out var valor) ? valor : null;
 
     public void GravarConfiguracao(string chave, string valor) => _configuracoes[chave] = valor;
+
+    public IReadOnlyList<ContagemDeJanela> ListarContagens() => _contagens.ToList();
+
+    public ContagemDeJanela SalvarContagem(ContagemDeJanela contagem)
+    {
+        if (contagem.Id > 0)
+        {
+            var indice = _contagens.FindIndex(item => item.Id == contagem.Id);
+            if (indice >= 0)
+                _contagens[indice] = _contagens[indice] with { Modo = contagem.Modo, SalvaEm = contagem.SalvaEm };
+            return contagem;
+        }
+
+        var gravada = contagem with { Id = _proximaContagem++ };
+        _contagens.Add(gravada);
+        return gravada;
+    }
+
+    public void ExcluirContagem(long id) => _contagens.RemoveAll(item => item.Id == id);
 }

@@ -1,7 +1,7 @@
 <Window x:Class="Esforco.Ui.JanelaDeVinculo"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Vincular a um escritório"
+        Title="Escritório e contagem da janela"
         Width="500"
         SizeToContent="Height"
         ResizeMode="NoResize"
@@ -74,7 +74,7 @@
                             Style="{StaticResource BotaoSecundario}"
                             Margin="0,0,8,0"/>
                     <Button x:Name="BotaoSalvar"
-                            Content="Vincular"
+                            Content="Salvar"
                             IsDefault="True"
                             Click="Confirmar"
                             Style="{StaticResource BotaoPrimario}"/>
@@ -130,6 +130,45 @@
                            VerticalAlignment="Center"/>
             </DockPanel>
 
+            <!-- A contagem é uma configuração da janela: é salva mesmo sem escolher escritório. -->
+            <StackPanel x:Name="PainelDaContagem">
+                <TextBlock Text="Contagem do tempo" Style="{StaticResource Rotulo}"/>
+                <RadioButton x:Name="ContagemEmFoco"
+                             GroupName="Contagem"
+                             IsChecked="True"
+                             Content="Só quando está em foco"/>
+                <RadioButton x:Name="ContagemAberta"
+                             GroupName="Contagem"
+                             Content="Enquanto estiver aberta, mesmo sem foco ou minimizada"/>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="Vale para"
+                               Foreground="#7A756C"
+                               VerticalAlignment="Center"
+                               Margin="0,0,10,0"/>
+                    <RadioButton x:Name="ContagemPelaJanela"
+                                 DockPanel.Dock="Left"
+                                 GroupName="AlcanceDaContagem"
+                                 IsChecked="True"
+                                 Checked="AoTrocarAlcanceDaContagem"
+                                 Content="esta janela"
+                                 Margin="0,0,14,0"/>
+                    <RadioButton x:Name="ContagemPeloPrograma"
+                                 GroupName="AlcanceDaContagem"
+                                 Checked="AoTrocarAlcanceDaContagem"
+                                 Margin="0">
+                        <TextBlock x:Name="TextoDoProgramaDaContagem"
+                                   Text="o programa inteiro"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </RadioButton>
+                </DockPanel>
+                <TextBlock x:Name="SituacaoDaContagem"
+                           Foreground="#7A756C"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+
             <TextBlock Text="Escritório" Style="{StaticResource Rotulo}"/>
             <TextBox x:Name="Busca"
                      Style="{StaticResource Campo}"
@@ -158,7 +197,7 @@
                       Padding="6,4"
                       ToolTip="Escolha uma categoria da sua lista ou escreva uma nova"/>
 
-            <TextBlock Text="Alcance" Style="{StaticResource Rotulo}"/>
+            <TextBlock Text="Alcance do escritório" Style="{StaticResource Rotulo}"/>
             <RadioButton x:Name="AlcancePrograma" GroupName="Alcance" Content="O programa inteiro"/>
             <RadioButton x:Name="AlcanceJanela" GroupName="Alcance" Content="Esta janela ou arquivo, pelo título"/>
             <RadioButton x:Name="AlcanceAba" GroupName="Alcance" Content="Esta aba, pelo título ou pelo endereço" Margin="0"/>

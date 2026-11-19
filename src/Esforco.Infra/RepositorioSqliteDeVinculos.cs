@@ -243,6 +243,73 @@ public sealed class RepositorioSqliteDeVinculos : IRepositorioDeVinculos, IDispo
         }
     }
 
+    public IReadOnlyList<ContagemDeJanela> ListarContagens()
+    {
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = "SELECT id, alcance, programa, titulo, modo, salva_em FROM contagens_janela ORDER BY id ASC;";
+            using var leitor = comando.ExecuteReader();
+            var lista = new List<ContagemDeJanela>();
+            while (leitor.Read())
+            {
+                var alcance = (AlcanceDaContagem)leitor.GetInt64(1);
+                var modo = (ModoDeContagem)leitor.GetInt64(4);
+                if (!Enum.IsDefined(alcance) || !Enum.IsDefined(modo))
+                    continue;
+
+                lista.Add(new ContagemDeJanela(
+                    leitor.GetInt64(0),
+                    alcance,
+                    leitor.GetString(2),
+                    leitor.GetString(3),
+                    modo,
+                    IsoDe(leitor.GetString(5))));
+            }
+
+            return lista;
+        }
+    }
+
+    public ContagemDeJanela SalvarContagem(ContagemDeJanela contagem)
+    {
+        ArgumentNullException.ThrowIfNull(contagem);
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.Parameters.AddWithValue("$modo", (int)contagem.Modo);
+            comando.Parameters.AddWithValue("$salva", Iso(contagem.SalvaEm));
+            if (contagem.Id > 0)
+            {
+                comando.CommandText = "UPDATE contagens_janela SET modo = $modo, salva_em = $salva WHERE id = $id;";
+                comando.Parameters.AddWithValue("$id", contagem.Id);
+                comando.ExecuteNonQuery();
+                return contagem;
+            }
+
+            comando.CommandText = """
+                INSERT INTO contagens_janela (alcance, programa, titulo, modo, salva_em)
+                VALUES ($alcance, $programa, $titulo, $modo, $salva);
+                SELECT last_insert_rowid();
+                """;
+            comando.Parameters.AddWithValue("$alcance", (int)contagem.Alcance);
+            comando.Parameters.AddWithValue("$programa", contagem.Programa);
+            comando.Parameters.AddWithValue("$titulo", contagem.Titulo);
+            return contagem with { Id = (long)comando.ExecuteScalar()! };
+        }
+    }
+
+    public void ExcluirContagem(long id)
+    {
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = "DELETE FROM contagens_janela WHERE id = $id;";
+            comando.Parameters.AddWithValue("$id", id);
+            comando.ExecuteNonQuery();
+        }
+    }
+
     public void Dispose() => _conexao.Dispose();
 
     private void Executar(string sql)

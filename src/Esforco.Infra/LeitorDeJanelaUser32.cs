@@ -108,6 +108,38 @@ public sealed class LeitorDeJanelaUser32 : ILeitorDeJanelaDaFrente
         }
     }
 
+    /// <summary>
+    /// Lista as janelas visíveis com título, de qualquer programa menos o Esforço. Minimizada conta
+    /// como aberta. Usa as mesmas consultas da leitura da reunião minimizada: nada é enviado para as janelas.
+    /// </summary>
+    public IReadOnlyList<JanelaAberta> LerAbertas()
+    {
+        var lista = new List<JanelaAberta>();
+        Native.EnumWindows(Visitar, IntPtr.Zero);
+        return lista;
+
+        bool Visitar(IntPtr janela, IntPtr parametro)
+        {
+            if (!Native.IsWindowVisible(janela))
+                return true;
+
+            var titulo = Titulo(janela);
+            if (titulo.Length == 0)
+                return true;
+
+            _ = Native.GetWindowThreadProcessId(janela, out uint pid);
+            if ((int)pid == Environment.ProcessId)
+                return true;
+
+            if (titulo.Length > 2000)
+                titulo = titulo[..2000];
+
+            var (amigavel, processo) = Nomes((int)pid);
+            lista.Add(new JanelaAberta(amigavel, titulo, Native.IsIconic(janela), Navegadores.Contains(processo)));
+            return true;
+        }
+    }
+
     private (string Amigavel, string Processo) Nomes(int pid)
     {
         if (pid <= 0)

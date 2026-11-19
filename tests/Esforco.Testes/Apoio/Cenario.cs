@@ -29,6 +29,20 @@ internal sealed class LeitorFalso : ILeitorDeJanelaDaFrente
     }
 
     public AmostraDeJanela? LerReuniaoMinimizada() => ReuniaoMinimizada;
+
+    public List<JanelaAberta> Abertas { get; } = [];
+
+    public int LeiturasDeAbertas { get; private set; }
+
+    public Exception? FalhaNasAbertas { get; set; }
+
+    public IReadOnlyList<JanelaAberta> LerAbertas()
+    {
+        LeiturasDeAbertas++;
+        if (FalhaNasAbertas is not null)
+            throw FalhaNasAbertas;
+        return Abertas.ToList();
+    }
 }
 
 internal sealed class RegrasFixas : IFonteDeRegrasDeEscritorio
