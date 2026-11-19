@@ -1,0 +1,73 @@
+<Window x:Class="Esforco.Ui.JanelaDeOcultos"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ocultar do relatório"
+        Width="440"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="#F6F4EF"
+        FontFamily="Segoe UI"
+        FontSize="13"
+        Foreground="#1C1B19"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="20">
+        <TextBlock TextWrapping="Wrap"
+                   Margin="0,0,0,14"
+                   Text="Um escritório com este nome ou este id sai do relatório de Escritórios. O tempo continua no Registro."/>
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <RadioButton x:Name="OpcaoNome"
+                         Content="Nome"
+                         GroupName="Tipo"
+                         IsChecked="True"
+                         Margin="0,0,16,0"/>
+            <RadioButton x:Name="OpcaoId"
+                         Content="Id"
+                         GroupName="Tipo"/>
+        </StackPanel>
+
+        <DockPanel Margin="0,0,0,6">
+            <Button DockPanel.Dock="Right"
+                    Content="Ocultar"
+                    Click="Adicionar"
+                    Style="{StaticResource BotaoPrimario}"
+                    Padding="14,6"
+                    Margin="8,0,0,0"/>
+            <TextBox x:Name="Texto" Style="{StaticResource Campo}"/>
+        </DockPanel>
+
+        <TextBlock x:Name="Aviso"
+                   TextWrapping="Wrap"
+                   Foreground="#8A3B32"
+                   Margin="0,0,0,10"
+                   MinHeight="18"/>
+
+        <TextBlock x:Name="Vazio"
+                   Text="Nenhum escritório oculto."
+                   Foreground="#7A756C"
+                   Margin="0,0,0,8"/>
+
+        <ItemsControl x:Name="Lista" Margin="0,0,0,16">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <DockPanel Margin="0,3,0,0">
+                        <Button DockPanel.Dock="Right"
+                                Content="tirar"
+                                Tag="{Binding Ocultacao}"
+                                Click="Tirar"
+                                Style="{StaticResource BotaoSecundario}"
+                                Padding="10,3"/>
+                        <TextBlock Text="{Binding Rotulo}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Button Content="Fechar"
+                IsCancel="True"
+                HorizontalAlignment="Right"
+                Style="{StaticResource BotaoSecundario}"
+                Padding="14,6"/>
+    </StackPanel>
+</Window>

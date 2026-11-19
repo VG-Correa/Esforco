@@ -1,0 +1,8 @@
+{
+  "comentario": "O escritório fica vazio até uma regra casar o título da janela. Coloque as regras em 'regras'. O campo 'exemplo' não é lido; ele só mostra o formato. Salve o arquivo: a próxima leitura já usa a alteração.",
+  "exemplo": {
+    "escritorio": "Nome do escritório",
+    "contem": ["trecho que aparece no título"]
+  },
+  "regras": []
+}

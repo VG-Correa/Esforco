@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Esforco.Aplicacao/Esforco.Aplicacao.csproj" />
+    <Project Path="src/Esforco.Dominio/Esforco.Dominio.csproj" />
+    <Project Path="src/Esforco.Infra/Esforco.Infra.csproj" />
+    <Project Path="src/Esforco.Ui/Esforco.Ui.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Esforco.Testes/Esforco.Testes.csproj" />
+  </Folder>
+</Solution>
