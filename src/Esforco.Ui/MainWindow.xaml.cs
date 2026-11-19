@@ -21,9 +21,18 @@ public partial class MainWindow : Window
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) =>
         {
+            // Minimizada não há tela para atualizar. A leitura da janela da frente segue em PulsoDeLeitura.
+            if (WindowState == WindowState.Minimized)
+                return;
+
             _modelo.AtualizarDuranteLeitura();
             if (RolagemDoCalendario.IsVisible)
                 InvalidarAgora(RolagemDoCalendario);
+        };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState != WindowState.Minimized)
+                _modelo.AtualizarDuranteLeitura();
         };
         _modelo.Atualizar();
         _timer.Start();

@@ -106,6 +106,127 @@ public sealed class RepositorioSqliteDeIntervalosTestes : IDisposable
     }
 
     [Fact]
+    public void A_lista_segue_o_banco_depois_de_cada_gravacao()
+    {
+        var oito = new DateTimeOffset(2026, 11, 17, 8, 0, 0, TimeSpan.FromHours(-3));
+
+        using var repositorio = new RepositorioSqliteDeIntervalos(Banco);
+        Assert.Empty(repositorio.Listar());
+
+        var word = IntervaloDeEsforco.Abrir("Word", "a.docx - Word", "a.docx", "", false, oito);
+        repositorio.Adicionar(word);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+
+        var antes = IntervaloDeEsforco.Abrir("Chrome", "Gmail - Google Chrome", "Gmail", "", false, oito.AddHours(-1), emSegundoPlano: true);
+        repositorio.Adicionar(antes);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.Equal(["Chrome", "Word"], repositorio.Listar().Select(item => item.Programa));
+
+        var mesmoInicio = IntervaloDeEsforco.Abrir("Discord", "geral - Discord", "geral", "", true, oito, emSegundoPlano: true);
+        repositorio.Adicionar(mesmoInicio);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+
+        // Gravado em outro fuso, o texto do início ordena depois de 08:00-03:00 mesmo sendo 07:30 daqui.
+        var outroFuso = IntervaloDeEsforco.Abrir("Excel", "b.xlsx - Excel", "b.xlsx", "", false, new DateTimeOffset(2026, 11, 17, 10, 30, 0, TimeSpan.Zero), emSegundoPlano: true);
+        repositorio.Adicionar(outroFuso);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+
+        word.Fechar(oito.AddMinutes(9));
+        repositorio.SalvarFechamento(word);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.Equal(oito.AddMinutes(9), repositorio.Listar().Single(item => item.Programa == "Word").Fim);
+
+        repositorio.DefinirSegundoPlano(antes, false);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.False(repositorio.Listar().Single(item => item.Programa == "Chrome").EmSegundoPlano);
+
+        repositorio.MarcarVisto(antes.Id!.Value, oito.AddMinutes(20));
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.Null(repositorio.Listar().Single(item => item.Programa == "Chrome").Fim);
+
+        word.AdiantarInicio(oito.AddMinutes(5));
+        repositorio.AtualizarLimites(word);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.Equal(["Chrome", "Discord", "Word", "Excel"], repositorio.Listar().Select(item => item.Programa));
+        Assert.Equal(oito.AddMinutes(5), repositorio.Listar()[2].Inicio);
+
+        repositorio.ExcluirIntervalo(mesmoInicio.Id!.Value);
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.DoesNotContain(repositorio.Listar(), item => item.Programa == "Discord");
+
+        repositorio.ExcluirPrograma("Chrome");
+        Assert.Equal(NoBanco(), NaLista(repositorio));
+        Assert.Equal(["Word", "Excel"], repositorio.Listar().Select(item => item.Programa));
+    }
+
+    [Fact]
+    public void Quem_altera_o_que_recebeu_da_lista_nao_altera_a_leitura_seguinte()
+    {
+        var inicio = new DateTimeOffset(2026, 11, 17, 8, 0, 0, TimeSpan.FromHours(-3));
+
+        using var repositorio = new RepositorioSqliteDeIntervalos(Banco);
+        repositorio.Adicionar(IntervaloDeEsforco.Abrir("Word", "a.docx - Word", "a.docx", "", false, inicio));
+
+        var primeira = Assert.Single(repositorio.Listar());
+        primeira.Fechar(inicio.AddMinutes(3));
+        primeira.MarcarVinculo("NTM");
+        primeira.MarcarDuranteReuniao(true);
+        primeira.DefinirSegundoPlano(true);
+
+        var segunda = Assert.Single(repositorio.Listar());
+        Assert.NotSame(primeira, segunda);
+        Assert.Null(segunda.Fim);
+        Assert.Equal("", segunda.EscritorioVinculado);
+        Assert.False(segunda.DuranteReuniao);
+        Assert.False(segunda.EmSegundoPlano);
+        Assert.Equal(primeira.Id, segunda.Id);
+    }
+
+    private static List<string> NaLista(RepositorioSqliteDeIntervalos repositorio) =>
+        repositorio.Listar()
+            .Select(item => string.Join(
+                "|",
+                item.Id,
+                item.Programa,
+                item.Titulo,
+                item.Contexto,
+                item.Minimizada ? 1 : 0,
+                item.EmSegundoPlano ? 1 : 0,
+                item.Inicio.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                item.Fim?.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? ""))
+            .ToList();
+
+    /// <summary>
+    /// Lê a tabela por outra conexão, sem passar pelo repositório, na ordem em que ele promete listar.
+    /// </summary>
+    private List<string> NoBanco()
+    {
+        using var conexao = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Banco,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString());
+        conexao.Open();
+        using var comando = conexao.CreateCommand();
+        comando.CommandText = """
+            SELECT id, programa, titulo, contexto, minimizada, segundo_plano, inicio, COALESCE(fim, '')
+            FROM intervalos
+            ORDER BY inicio ASC, id ASC;
+            """;
+        using var leitor = comando.ExecuteReader();
+        var lista = new List<string>();
+        while (leitor.Read())
+        {
+            var valores = new object[leitor.FieldCount];
+            leitor.GetValues(valores);
+            lista.Add(string.Join("|", valores));
+        }
+
+        return lista;
+    }
+
+    [Fact]
     public void Banco_antigo_ganha_as_colunas_do_painel()
     {
         using (var conexao = new SqliteConnection($"Data Source={Banco}"))

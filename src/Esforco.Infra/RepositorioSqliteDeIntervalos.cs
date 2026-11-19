@@ -11,6 +11,8 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
 
     private readonly SqliteConnection _conexao;
     private readonly object _trava = new();
+    private readonly Dictionary<string, string> _textos = new(StringComparer.Ordinal);
+    private List<Linha>? _linhas;
 
     public RepositorioSqliteDeIntervalos(string caminhoDoBanco)
     {
@@ -172,6 +174,7 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
             comando.Parameters.AddWithValue("$segundo", emSegundoPlano ? 1 : 0);
             comando.Parameters.AddWithValue("$id", id);
             comando.ExecuteNonQuery();
+            MudarNaMemoria(id, linha => linha.SegundoPlano = emSegundoPlano);
         }
     }
 
@@ -196,6 +199,7 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
             comando.CommandText = "SELECT last_insert_rowid();";
             var id = (long)comando.ExecuteScalar()!;
             intervalo.DefinirId(id);
+            GuardarNaMemoria(intervalo, id, Iso(intervalo.Inicio));
         }
     }
 
@@ -213,9 +217,11 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
                 SET fim = $fim, visto_em = $fim
                 WHERE id = $id;
                 """;
-            comando.Parameters.AddWithValue("$fim", Iso(fim));
+            var texto = Iso(fim);
+            comando.Parameters.AddWithValue("$fim", texto);
             comando.Parameters.AddWithValue("$id", id);
             comando.ExecuteNonQuery();
+            MudarNaMemoria(id, linha => linha.Fim = IsoDe(texto));
         }
     }
 
@@ -235,22 +241,132 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
         }
     }
 
+    /// <summary>
+    /// A tela pede a lista inteira a cada segundo. O banco é lido uma vez e as linhas ficam em memória,
+    /// acompanhando cada gravação feita por aqui. Quem chama recebe objetos novos e pode alterá-los.
+    /// </summary>
     public IReadOnlyList<IntervaloDeEsforco> Listar()
     {
         lock (_trava)
         {
-            using var comando = _conexao.CreateCommand();
-            comando.CommandText = """
-                SELECT id, programa, titulo, contexto, escritorio, plano, periodo, sessao, item, tipo_item, minimizada, segundo_plano, retomado, inicio, fim
-                FROM intervalos
-                ORDER BY inicio ASC, id ASC;
-                """;
-            using var leitor = comando.ExecuteReader();
-            var lista = new List<IntervaloDeEsforco>();
-            while (leitor.Read())
-                lista.Add(Ler(leitor));
+            _linhas ??= LerLinhas();
+            var lista = new List<IntervaloDeEsforco>(_linhas.Count);
+            foreach (var linha in _linhas)
+                lista.Add(linha.Criar());
             return lista;
         }
+    }
+
+    private List<Linha> LerLinhas()
+    {
+        using var comando = _conexao.CreateCommand();
+        comando.CommandText = """
+            SELECT id, programa, titulo, contexto, escritorio, plano, periodo, sessao, item, tipo_item, minimizada, segundo_plano, retomado, inicio, fim
+            FROM intervalos
+            ORDER BY inicio ASC, id ASC;
+            """;
+        using var leitor = comando.ExecuteReader();
+        var lista = new List<Linha>();
+        while (leitor.Read())
+        {
+            var inicio = leitor.GetString(13);
+            lista.Add(new Linha
+            {
+                Id = leitor.GetInt64(0),
+                Programa = Unico(leitor.GetString(1)),
+                Titulo = Unico(leitor.GetString(2)),
+                Contexto = Unico(leitor.GetString(3)),
+                Escritorio = Unico(leitor.GetString(4)),
+                Plano = Unico(leitor.GetString(5)),
+                Periodo = Unico(leitor.GetString(6)),
+                Sessao = Unico(leitor.GetString(7)),
+                Item = Unico(leitor.GetString(8)),
+                Tipo = TipoDe(leitor.GetInt64(9)),
+                Minimizada = leitor.GetInt64(10) != 0,
+                SegundoPlano = leitor.GetInt64(11) != 0,
+                Retomado = leitor.GetInt64(12) != 0,
+                InicioGravado = inicio,
+                Inicio = IsoDe(inicio),
+                Fim = leitor.IsDBNull(14) ? null : IsoDe(leitor.GetString(14)),
+            });
+        }
+
+        return lista;
+    }
+
+    /// <summary>
+    /// O mesmo título se repete em centenas de linhas. Guardar um texto só para todas poupa memória.
+    /// </summary>
+    private string Unico(string texto)
+    {
+        if (texto.Length == 0)
+            return "";
+
+        if (_textos.TryGetValue(texto, out var guardado))
+            return guardado;
+
+        _textos[texto] = texto;
+        return texto;
+    }
+
+    /// <summary>
+    /// Põe a linha nova no lugar em que o banco a devolveria: ordem do texto do início e, no empate, do id.
+    /// </summary>
+    private void GuardarNaMemoria(IntervaloDeEsforco intervalo, long id, string inicio)
+    {
+        if (_linhas is null)
+            return;
+
+        var linha = new Linha
+        {
+            Id = id,
+            Programa = Unico(intervalo.Programa),
+            Titulo = Unico(intervalo.Titulo),
+            Contexto = Unico(intervalo.Contexto),
+            Escritorio = Unico(intervalo.Escritorio),
+            Plano = Unico(intervalo.Plano),
+            Periodo = Unico(intervalo.Periodo),
+            Sessao = Unico(intervalo.Sessao),
+            Item = Unico(intervalo.Item),
+            Tipo = TipoDe((int)intervalo.TipoDoItem),
+            Minimizada = intervalo.Minimizada,
+            SegundoPlano = intervalo.EmSegundoPlano,
+            Retomado = intervalo.Retomado,
+            InicioGravado = inicio,
+            Inicio = IsoDe(inicio),
+            Fim = null,
+        };
+
+        var posicao = _linhas.Count;
+        while (posicao > 0 && Depois(_linhas[posicao - 1], linha))
+            posicao--;
+        _linhas.Insert(posicao, linha);
+    }
+
+    private static bool Depois(Linha a, Linha b)
+    {
+        var ordem = string.CompareOrdinal(a.InicioGravado, b.InicioGravado);
+        return ordem > 0 || (ordem == 0 && a.Id > b.Id);
+    }
+
+    /// <summary>
+    /// Sem achar a linha, a memória é descartada e a próxima leitura volta ao banco.
+    /// </summary>
+    private void MudarNaMemoria(long id, Action<Linha> mudar)
+    {
+        if (_linhas is null)
+            return;
+
+        for (var i = _linhas.Count - 1; i >= 0; i--)
+        {
+            if (_linhas[i].Id != id)
+                continue;
+
+            mudar(_linhas[i]);
+            return;
+        }
+
+        _linhas = null;
     }
 
     public IReadOnlyList<PreferenciaDePrograma> ListarPreferencias()
@@ -321,6 +437,7 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
             comando.CommandText = "DELETE FROM preferencias WHERE programa = $programa;";
             comando.ExecuteNonQuery();
             transacao.Commit();
+            _linhas = null;
         }
     }
 
@@ -332,6 +449,7 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
             comando.CommandText = "DELETE FROM intervalos WHERE id = $id;";
             comando.Parameters.AddWithValue("$id", id);
             comando.ExecuteNonQuery();
+            _linhas = null;
         }
     }
 
@@ -353,6 +471,7 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
             comando.Parameters.AddWithValue("$fim", intervalo.Fim is DateTimeOffset fim ? Iso(fim) : DBNull.Value);
             comando.Parameters.AddWithValue("$id", id);
             comando.ExecuteNonQuery();
+            _linhas = null;
         }
     }
 
@@ -594,11 +713,68 @@ public sealed class RepositorioSqliteDeIntervalos : IRepositorioDeIntervalos, ID
         Executar($"ALTER TABLE intervalos ADD COLUMN {nome} {definicao};");
     }
 
+    private static TipoDeItem TipoDe(long valor)
+    {
+        var tipo = (TipoDeItem)valor;
+        return Enum.IsDefined(tipo) ? tipo : TipoDeItem.Nenhum;
+    }
+
+    private sealed class Linha
+    {
+        public required long Id { get; init; }
+
+        public required string Programa { get; init; }
+
+        public required string Titulo { get; init; }
+
+        public required string Contexto { get; init; }
+
+        public required string Escritorio { get; init; }
+
+        public required string Plano { get; init; }
+
+        public required string Periodo { get; init; }
+
+        public required string Sessao { get; init; }
+
+        public required string Item { get; init; }
+
+        public required TipoDeItem Tipo { get; init; }
+
+        public required bool Minimizada { get; init; }
+
+        public required bool SegundoPlano { get; set; }
+
+        public required bool Retomado { get; init; }
+
+        public required string InicioGravado { get; init; }
+
+        public required DateTimeOffset Inicio { get; init; }
+
+        public required DateTimeOffset? Fim { get; set; }
+
+        public IntervaloDeEsforco Criar() =>
+            IntervaloDeEsforco.Restaurar(
+                Id,
+                Programa,
+                Titulo,
+                Contexto,
+                Escritorio,
+                Plano,
+                Periodo,
+                Sessao,
+                Item,
+                Tipo,
+                Minimizada,
+                Inicio,
+                Fim,
+                SegundoPlano,
+                Retomado);
+    }
+
     private static IntervaloDeEsforco Ler(SqliteDataReader leitor)
     {
-        var tipo = (TipoDeItem)leitor.GetInt64(leitor.GetOrdinal("tipo_item"));
-        if (!Enum.IsDefined(tipo))
-            tipo = TipoDeItem.Nenhum;
+        var tipo = TipoDe(leitor.GetInt64(leitor.GetOrdinal("tipo_item")));
 
         var fimOrdinal = leitor.GetOrdinal("fim");
         var fim = leitor.IsDBNull(fimOrdinal) ? (DateTimeOffset?)null : IsoDe(leitor.GetString(fimOrdinal));

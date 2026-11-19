@@ -17,8 +17,6 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
     private readonly AtalhoDaJanela _atalho;
     private JanelaDeVinculo? _janelinha;
     private bool _abrindoVinculo;
-    private readonly Dictionary<long, LinhaIntervaloVm> _linhas = new();
-    private readonly Dictionary<string, NoVm> _nos = new();
     private readonly Dictionary<string, bool> _expansao = new();
     private bool? _expansaoPadrao;
     private bool _emLeitura;
@@ -26,7 +24,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
     private bool _mostrarOcultos;
     private bool _temOcultos;
     private int _quantidadeOcultos;
-    private string? _assinatura;
+    private bool _refazerRegistro = true;
     private string _textoVazio = "Nenhum intervalo ainda. Parado, o programa não lê a janela.";
     private DateTime _diaInicial = DateTime.Today;
     private DateTime _diaFinal = DateTime.Today;
@@ -345,28 +343,49 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         Atualizar();
     }
 
+    /// <summary>
+    /// Só a página à vista é refeita. As outras são trazidas em dia quando a pessoa troca para elas,
+    /// em <see cref="DefinirPagina"/>. Com a leitura ligada isto roda a cada segundo.
+    /// </summary>
     public void Atualizar()
     {
-        var resumo = _servico.ConsultarResumo(_diaInicial, _diaFinal);
-        var agora = DateTimeOffset.Now;
-
-        if (resumo.EmLeitura != _emLeitura)
+        var emLeitura = _servico.EmLeitura;
+        if (emLeitura != _emLeitura)
         {
-            _emLeitura = resumo.EmLeitura;
+            _emLeitura = emLeitura;
             Notificar(nameof(Situacao));
             Notificar(nameof(EmLeitura));
             CommandManager.InvalidateRequerySuggested();
         }
 
-        var assinatura = Assinatura(resumo);
-        if (assinatura != _assinatura || !AtualizarDuracoes(Visiveis(resumo), Nos, agora))
+        switch (_pagina)
         {
-            _assinatura = assinatura;
-            Reconstruir(resumo, agora);
+            case PaginaDaJanela.Registro:
+                AtualizarRegistro();
+                break;
+            case PaginaDaJanela.Calendario:
+                AtualizarCalendario();
+                break;
+            default:
+                AtualizarRelatorio();
+                break;
+        }
+    }
+
+    private void AtualizarRegistro()
+    {
+        var resumo = _servico.ConsultarResumo(_diaInicial, _diaFinal);
+        var agora = DateTimeOffset.Now;
+        if (_refazerRegistro)
+        {
+            _refazerRegistro = false;
+            Nos.Clear();
         }
 
-        AtualizarRelatorio();
-        AtualizarCalendario();
+        var ocultos = ContarOcultos(resumo);
+        SincronizarNos(Visiveis(resumo), Nos, "", agora, 0, resumo);
+        DefinirOcultos(ocultos);
+        DefinirVazio(Nos.Count == 0, ocultos > 0 && !_mostrarOcultos, resumo.TemRegistros);
     }
 
     private void DefinirPagina(PaginaDaJanela pagina)
@@ -375,6 +394,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             return;
 
         _pagina = pagina;
+        Atualizar();
         Notificar(nameof(NaPaginaDeRegistro));
         Notificar(nameof(NaPaginaDeCalendario));
         Notificar(nameof(NaPaginaDeRelatorio));
@@ -519,7 +539,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
 
     private void RecarregarTudo()
     {
-        _assinatura = null;
+        _refazerRegistro = true;
         _assinaturaCalendario = null;
         Atualizar();
         CommandManager.InvalidateRequerySuggested();
@@ -803,20 +823,6 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         CommandManager.InvalidateRequerySuggested();
     }
 
-    private void Reconstruir(ResumoDeEsforco resumo, DateTimeOffset agora)
-    {
-        Nos.Clear();
-        _linhas.Clear();
-        _nos.Clear();
-
-        var ocultos = ContarOcultos(resumo);
-        foreach (var no in Visiveis(resumo))
-            Nos.Add(Criar(no, "", agora, 0, resumo));
-
-        DefinirOcultos(ocultos);
-        DefinirVazio(Nos.Count == 0, ocultos > 0 && !_mostrarOcultos, resumo.TemRegistros);
-    }
-
     private void Deslocar(int direcao)
     {
         var (inicio, fim) = FiltroDeDatas.Deslocar(_filtro, _diaInicial, _diaFinal, direcao, _incluirFimDeSemana);
@@ -874,7 +880,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         Notificar(nameof(DiaInicial));
         Notificar(nameof(DiaFinal));
         NotificarFiltro();
-        _assinatura = null;
+        _refazerRegistro = true;
         Atualizar();
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(SoltarAjuste));
     }
@@ -921,7 +927,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
     private void AoAlternarOcultos()
     {
         _mostrarOcultos = !_mostrarOcultos;
-        _assinatura = null;
+        _refazerRegistro = true;
         Atualizar();
         Notificar(nameof(TextoOcultos));
     }
@@ -1000,7 +1006,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
 
     private void Recarregar()
     {
-        _assinatura = null;
+        _refazerRegistro = true;
         Atualizar();
         CommandManager.InvalidateRequerySuggested();
     }
@@ -1021,24 +1027,9 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             FixarPrograma,
             OcultarPrograma,
             ExcluirPrograma);
-        _nos[chave] = vm;
 
         foreach (var intervalo in no.Intervalos)
-        {
-            var linha = new LinhaIntervaloVm(
-                intervalo.Id ?? 0,
-                Formatar.Instante(intervalo.Inicio),
-                Formatar.Fim(intervalo.Fim),
-                Formatar.Duracao(intervalo.DuracaoAte(agora)),
-                EscritorioDe(intervalo),
-                intervalo.Minimizada ? "minimizada" : "ativa",
-                intervalo.DuranteReuniao,
-                intervalo.EhChatwoot,
-                intervalo.EscritorioVinculado.Length > 0);
-            if (intervalo.Id is long id)
-                _linhas[id] = linha;
-            vm.Intervalos.Add(linha);
-        }
+            vm.Intervalos.Add(CriarLinha(intervalo, agora));
 
         foreach (var filho in no.Filhos)
             vm.Filhos.Add(Criar(filho, chave, agora, nivel + 1, resumo));
@@ -1047,10 +1038,177 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         return vm;
     }
 
+    private static LinhaIntervaloVm CriarLinha(IntervaloDeEsforco intervalo, DateTimeOffset agora) =>
+        new(
+            intervalo.Id ?? 0,
+            intervalo.Inicio,
+            intervalo.Fim,
+            Formatar.Instante(intervalo.Inicio),
+            Formatar.Fim(intervalo.Fim),
+            Formatar.Duracao(intervalo.DuracaoAte(agora)),
+            EscritorioDe(intervalo),
+            JanelaDe(intervalo),
+            intervalo.DuranteReuniao,
+            intervalo.EhChatwoot,
+            intervalo.EscritorioVinculado.Length > 0);
+
     private static string EscritorioDe(IntervaloDeEsforco intervalo) =>
         intervalo.EscritorioVinculado.Length > 0
             ? $"{intervalo.EscritorioVinculado} (vínculo)"
             : string.IsNullOrWhiteSpace(intervalo.Escritorio) ? "vazio" : intervalo.Escritorio;
+
+    private static string JanelaDe(IntervaloDeEsforco intervalo) => intervalo.Minimizada ? "minimizada" : "ativa";
+
+    /// <summary>
+    /// Traz a árvore da tela para o que o resumo diz, mexendo só no que mudou. Refazer tudo custa
+    /// centenas de elementos de tela, e isto roda a cada segundo com a leitura ligada.
+    /// </summary>
+    private void SincronizarNos(
+        IReadOnlyList<NoDeEsforco> nos,
+        ObservableCollection<NoVm> vms,
+        string prefixo,
+        DateTimeOffset agora,
+        int nivel,
+        ResumoDeEsforco resumo)
+    {
+        if (!MesmosNos(nos, vms))
+        {
+            var rotulos = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var no in nos)
+                rotulos.Add(no.Rotulo);
+
+            for (var i = vms.Count - 1; i >= 0; i--)
+            {
+                if (!rotulos.Contains(vms[i].Rotulo))
+                    vms.RemoveAt(i);
+            }
+
+            for (var i = 0; i < nos.Count; i++)
+            {
+                var atual = -1;
+                for (var j = i; j < vms.Count; j++)
+                {
+                    if (vms[j].Rotulo != nos[i].Rotulo)
+                        continue;
+
+                    atual = j;
+                    break;
+                }
+
+                if (atual < 0)
+                    vms.Insert(i, Criar(nos[i], prefixo, agora, nivel, resumo));
+                else if (atual != i)
+                    vms.Move(atual, i);
+            }
+
+            while (vms.Count > nos.Count)
+                vms.RemoveAt(vms.Count - 1);
+        }
+
+        for (var i = 0; i < nos.Count; i++)
+        {
+            var no = nos[i];
+            var vm = vms[i];
+            if (nivel == 1 && !vm.TemPreferencia(PreferenciaDe(resumo, no.Rotulo)))
+            {
+                vms[i] = Criar(no, prefixo, agora, nivel, resumo);
+                continue;
+            }
+
+            vm.DuracaoTotal = Formatar.Duracao(no.DuracaoTotal);
+            var tinhaConteudo = vm.TemConteudo;
+            var tinhaIntervalos = vm.TemIntervalos;
+            SincronizarLinhas(no.Intervalos, vm.Intervalos, agora);
+            SincronizarNos(no.Filhos, vm.Filhos, vm.Chave, agora, nivel + 1, resumo);
+            if (tinhaConteudo != vm.TemConteudo || tinhaIntervalos != vm.TemIntervalos)
+                vm.AtualizarConteudo();
+        }
+    }
+
+    private static bool MesmosNos(IReadOnlyList<NoDeEsforco> nos, ObservableCollection<NoVm> vms)
+    {
+        if (nos.Count != vms.Count)
+            return false;
+
+        for (var i = 0; i < nos.Count; i++)
+        {
+            if (vms[i].Rotulo != nos[i].Rotulo)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void SincronizarLinhas(
+        IReadOnlyList<IntervaloDeEsforco> intervalos,
+        ObservableCollection<LinhaIntervaloVm> linhas,
+        DateTimeOffset agora)
+    {
+        if (!MesmasLinhas(intervalos, linhas))
+        {
+            var chaves = new HashSet<(long, DateTimeOffset)>();
+            foreach (var intervalo in intervalos)
+                chaves.Add((intervalo.Id ?? 0, intervalo.Inicio));
+
+            for (var i = linhas.Count - 1; i >= 0; i--)
+            {
+                if (!chaves.Contains((linhas[i].Id, linhas[i].Comeco)))
+                    linhas.RemoveAt(i);
+            }
+
+            for (var i = 0; i < intervalos.Count; i++)
+            {
+                var atual = -1;
+                for (var j = i; j < linhas.Count; j++)
+                {
+                    if (!linhas[j].EhDe(intervalos[i]))
+                        continue;
+
+                    atual = j;
+                    break;
+                }
+
+                if (atual < 0)
+                    linhas.Insert(i, CriarLinha(intervalos[i], agora));
+                else if (atual != i)
+                    linhas.Move(atual, i);
+            }
+
+            while (linhas.Count > intervalos.Count)
+                linhas.RemoveAt(linhas.Count - 1);
+        }
+
+        for (var i = 0; i < intervalos.Count; i++)
+        {
+            var intervalo = intervalos[i];
+            var linha = linhas[i];
+            var vinculado = intervalo.EscritorioVinculado.Length > 0;
+            if (linha.Vinculado != vinculado
+                || linha.EhChat != intervalo.EhChatwoot
+                || linha.Escritorio != EscritorioDe(intervalo)
+                || linha.Janela != JanelaDe(intervalo))
+            {
+                linhas[i] = CriarLinha(intervalo, agora);
+                continue;
+            }
+
+            linha.Atualizar(intervalo, agora);
+        }
+    }
+
+    private static bool MesmasLinhas(IReadOnlyList<IntervaloDeEsforco> intervalos, ObservableCollection<LinhaIntervaloVm> linhas)
+    {
+        if (intervalos.Count != linhas.Count)
+            return false;
+
+        for (var i = 0; i < intervalos.Count; i++)
+        {
+            if (!linhas[i].EhDe(intervalos[i]))
+                return false;
+        }
+
+        return true;
+    }
 
     private bool AbertoInicial(string chave, bool raiz)
     {
@@ -1076,37 +1234,6 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             no.Expandido = aberto;
             DefinirExpansao(no.Filhos, aberto);
         }
-    }
-
-    private bool AtualizarDuracoes(IReadOnlyList<NoDeEsforco> nos, IList<NoVm> vms, DateTimeOffset agora)
-    {
-        if (nos.Count != vms.Count)
-            return false;
-
-        for (var i = 0; i < nos.Count; i++)
-        {
-            var no = nos[i];
-            var vm = vms[i];
-            if (vm.Rotulo != no.Rotulo || no.Intervalos.Count != vm.Intervalos.Count)
-                return false;
-
-            vm.DuracaoTotal = Formatar.Duracao(no.DuracaoTotal);
-            foreach (var intervalo in no.Intervalos)
-            {
-                if (intervalo.Id is not long id || !_linhas.TryGetValue(id, out var linha))
-                    return false;
-
-                linha.Atualizar(
-                    Formatar.Fim(intervalo.Fim),
-                    Formatar.Duracao(intervalo.DuracaoAte(agora)),
-                    intervalo.DuranteReuniao);
-            }
-
-            if (!AtualizarDuracoes(no.Filhos, vm.Filhos, agora))
-                return false;
-        }
-
-        return true;
     }
 
     private void DefinirVazio(bool vazio, bool tudoOculto, bool temRegistros)
@@ -1146,42 +1273,6 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         _temOcultos = tem;
         Notificar(nameof(TemOcultos));
         CommandManager.InvalidateRequerySuggested();
-    }
-
-    private string Assinatura(ResumoDeEsforco resumo)
-    {
-        var texto = new StringBuilder();
-        texto.Append(_diaInicial.ToString("yyyy-MM-dd")).Append(':');
-        texto.Append(_diaFinal.ToString("yyyy-MM-dd")).Append('|');
-        texto.Append(_mostrarOcultos ? '1' : '0').Append('|');
-        foreach (var preferencia in resumo.Preferencias.OrderBy(item => item.Key, StringComparer.Ordinal))
-        {
-            texto.Append(preferencia.Key).Append(':');
-            texto.Append(preferencia.Value.Oculto ? '1' : '0');
-            texto.Append(preferencia.Value.Fixado ? '1' : '0');
-            texto.Append(preferencia.Value.Pausado ? '1' : '0');
-            texto.Append('|');
-        }
-
-        foreach (var no in resumo.Nos)
-            Assinar(no, texto);
-        return texto.ToString();
-    }
-
-    private static void Assinar(NoDeEsforco no, StringBuilder texto)
-    {
-        texto.Append(no.Rotulo).Append('>');
-        foreach (var intervalo in no.Intervalos)
-        {
-            texto.Append(intervalo.Id);
-            texto.Append(':');
-            texto.Append(intervalo.Fim?.UtcTicks.ToString() ?? "aberto");
-            texto.Append(':').Append(intervalo.EscritorioVinculado);
-            texto.Append('|');
-        }
-
-        foreach (var filho in no.Filhos)
-            Assinar(filho, texto);
     }
 
     private void Notificar(string nome) =>
@@ -1300,6 +1391,9 @@ public sealed class NoVm : Observavel
 
     public bool TemMarcas => Marcas.Length > 0;
 
+    public bool TemPreferencia(PreferenciaDePrograma preferencia) =>
+        Oculto == preferencia.Oculto && Fixado == preferencia.Fixado && Pausado == preferencia.Pausado;
+
     public ObservableCollection<NoVm> Filhos { get; } = new();
 
     public ObservableCollection<LinhaIntervaloVm> Intervalos { get; } = new();
@@ -1358,11 +1452,12 @@ public sealed class LinhaIntervaloVm : Observavel
     private string _fim;
     private string _duracao;
     private bool _duranteReuniao;
-    private readonly bool _ehChat;
-    private readonly bool _vinculado;
+    private DateTimeOffset? _termino;
 
     public LinhaIntervaloVm(
         long id,
+        DateTimeOffset comeco,
+        DateTimeOffset? termino,
         string inicio,
         string fim,
         string duracao,
@@ -1372,18 +1467,32 @@ public sealed class LinhaIntervaloVm : Observavel
         bool ehChat = false,
         bool vinculado = false)
     {
-        _vinculado = vinculado;
+        Vinculado = vinculado;
         Id = id;
+        Comeco = comeco;
+        _termino = termino;
         Inicio = inicio;
         _fim = fim;
         _duracao = duracao;
         Escritorio = escritorio;
         Janela = janela;
         _duranteReuniao = duranteReuniao;
-        _ehChat = ehChat;
+        EhChat = ehChat;
     }
 
+    /// <summary>
+    /// Zero quando a linha é uma reunião juntada de vários registros, que não tem um id só.
+    /// </summary>
     public long Id { get; }
+
+    public DateTimeOffset Comeco { get; }
+
+    public bool EhChat { get; }
+
+    public bool Vinculado { get; }
+
+    public bool EhDe(IntervaloDeEsforco intervalo) =>
+        Id == (intervalo.Id ?? 0) && Comeco == intervalo.Inicio;
 
     public string Inicio { get; }
 
@@ -1418,20 +1527,28 @@ public sealed class LinhaIntervaloVm : Observavel
     }
 
     public string? Dica => !DuranteReuniao
-        ? _vinculado
+        ? Vinculado
             ? "Este escritório veio de um vínculo manual. O tempo entra em Outros trabalhos no relatório de Escritórios."
             : null
-        : _vinculado
+        : Vinculado
             ? "Este trabalho vinculado foi durante a reunião do mesmo escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total."
-            : _ehChat
+            : EhChat
             ? "Este Chatwoot foi durante a reunião do escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total."
             : "Este uso do painel foi durante a reunião do escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total.";
 
-    public void Atualizar(string fim, string duracao, bool duranteReuniao)
+    /// <summary>
+    /// Um intervalo fechado não muda mais de fim nem de duração: os textos só são refeitos
+    /// para o que está aberto ou acabou de fechar.
+    /// </summary>
+    public void Atualizar(IntervaloDeEsforco intervalo, DateTimeOffset agora)
     {
-        Fim = fim;
-        Duracao = duracao;
-        DuranteReuniao = duranteReuniao;
+        DuranteReuniao = intervalo.DuranteReuniao;
+        if (intervalo.Fim is not null && intervalo.Fim == _termino)
+            return;
+
+        _termino = intervalo.Fim;
+        Fim = Formatar.Fim(intervalo.Fim);
+        Duracao = Formatar.Duracao(intervalo.DuracaoAte(agora));
     }
 }
 
