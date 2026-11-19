@@ -8,7 +8,10 @@ public sealed record ContextoDeVinculos(
     public static ContextoDeVinculos Vazio { get; } = new([], [], new Dictionary<long, string>());
 }
 
-public sealed record VinculoAplicado(long VinculoId, string Escritorio, long? CategoriaId, string Categoria);
+/// <summary>
+/// Manual é verdadeiro quando o escritório vem de um registro manual, e não de um vínculo: aí VinculoId é zero.
+/// </summary>
+public sealed record VinculoAplicado(long VinculoId, string Escritorio, long? CategoriaId, string Categoria, bool Manual = false);
 
 /// <summary>
 /// Um pedaço de intervalo. Origem é o intervalo gravado; Intervalo é o pedaço, igual à origem
@@ -35,7 +38,7 @@ public static class AplicadorDeVinculos
         if (contexto is null || contexto.Vinculos.Count == 0)
         {
             foreach (var intervalo in lista)
-                trechos.Add(new TrechoDeEsforco(intervalo, intervalo, null));
+                trechos.Add(new TrechoDeEsforco(intervalo, intervalo, DoRegistroManual(intervalo)));
             return trechos;
         }
 
@@ -56,10 +59,23 @@ public static class AplicadorDeVinculos
         }
 
         foreach (var intervalo in lista)
-            Repartir(intervalo, validos, contexto.Enderecos, nomes, agora, trechos);
+        {
+            if (DoRegistroManual(intervalo) is VinculoAplicado manual)
+                trechos.Add(new TrechoDeEsforco(intervalo, intervalo, manual));
+            else
+                Repartir(intervalo, validos, contexto.Enderecos, nomes, agora, trechos);
+        }
 
         return trechos;
     }
+
+    /// <summary>
+    /// O registro manual já diz o escritório e a categoria: nenhum vínculo é procurado para ele.
+    /// </summary>
+    private static VinculoAplicado? DoRegistroManual(IntervaloDeEsforco intervalo) =>
+        intervalo.Manual is MarcaDeRegistroManual marca
+            ? new VinculoAplicado(0, intervalo.Escritorio, marca.CategoriaId, marca.Categoria, true)
+            : null;
 
     private static void Repartir(
         IntervaloDeEsforco intervalo,

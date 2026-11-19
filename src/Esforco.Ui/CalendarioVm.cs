@@ -7,14 +7,19 @@ namespace Esforco.Ui;
 public sealed class DiaCalendarioVm : Observavel
 {
     private string _duracao;
+    private readonly Action<DateTime, int, int>? _criar;
 
     public DiaCalendarioVm(
         DiaDeCalendario dia,
         int horaInicial,
         int horaFinal,
         Action<DateTime> abrir,
-        Action<AlvoDeVinculo>? vincular = null)
+        Action<AlvoDeVinculo>? vincular = null,
+        Action<DateTime, int, int>? criar = null,
+        Action<long>? editar = null)
     {
+        Dia = dia.Dia;
+        _criar = criar;
         Rotulo = dia.Rotulo;
         Numero = dia.Numero.ToString();
         _duracao = dia.Duracao;
@@ -24,10 +29,20 @@ public sealed class DiaCalendarioVm : Observavel
         HoraInicial = horaInicial;
         HoraFinal = horaFinal;
         TemFaixa = dia.Blocos.Count > 0;
-        Blocos = dia.Blocos.Select(bloco => new BlocoCalendarioVm(bloco, vincular)).ToList();
+        Blocos = dia.Blocos.Select(bloco => new BlocoCalendarioVm(bloco, vincular, editar)).ToList();
         Linhas = dia.Linhas.Select(linha => new LinhaCalendarioVm(linha)).ToList();
         Abrir = new Comando(() => abrir(dia.Dia), () => dia.NoPeriodo);
     }
+
+    public DateTime Dia { get; }
+
+    public bool PodeCriar => _criar is not null;
+
+    /// <summary>
+    /// Clique ou arrasto numa área vazia da coluna do dia: abre a criação de um registro manual
+    /// com o horário escolhido, em minutos do dia.
+    /// </summary>
+    public void Criar(int inicioMinuto, int fimMinuto) => _criar?.Invoke(Dia, inicioMinuto, fimMinuto);
 
     public string Rotulo { get; }
 
@@ -70,11 +85,17 @@ public sealed class BlocoCalendarioVm : Observavel
     private string _dica;
     private AlvoDeVinculo? _alvo;
     private readonly Action<AlvoDeVinculo>? _vincular;
+    private readonly Action<long>? _editar;
 
-    public BlocoCalendarioVm(BlocoDeCalendario bloco, Action<AlvoDeVinculo>? vincular = null)
+    public BlocoCalendarioVm(
+        BlocoDeCalendario bloco,
+        Action<AlvoDeVinculo>? vincular = null,
+        Action<long>? editar = null)
     {
         _alvo = bloco.Alvo;
         _vincular = vincular;
+        _editar = editar;
+        Manual = bloco.Manual;
         Titulo = bloco.Titulo;
         Subtitulo = bloco.Subtitulo;
         Tipo = bloco.Tipo;
@@ -113,16 +134,35 @@ public sealed class BlocoCalendarioVm : Observavel
         "Chatwoot" => "\uE8F2",
         "Reunião" => "\uE714",
         CalendarioDeEsforco.TipoVinculo => "\uE71B",
+        CalendarioDeEsforco.TipoManual => "\uE70F",
         _ => "",
     };
 
-    public bool Clicavel => _alvo is not null && _vincular is not null;
+    /// <summary>
+    /// O id do registro manual, quando a faixa é um. Ela aparece hachurada e o clique abre a edição.
+    /// </summary>
+    public long? Manual { get; }
+
+    public bool EhManual => Manual is not null;
+
+    public bool Clicavel => EhManual ? _editar is not null : _alvo is not null && _vincular is not null;
+
+    public string DicaDoClique => EhManual
+        ? "Registro manual. Clique para editar ou excluir"
+        : "Clique para vincular a um escritório";
 
     /// <summary>
-    /// Clique na faixa: abre a janelinha de vínculo para o período inteiro dela.
+    /// Clique na faixa: no registro manual abre a edição dele; nas outras, a janelinha de vínculo
+    /// para o período inteiro da faixa.
     /// </summary>
     public void Clicar()
     {
+        if (Manual is long id)
+        {
+            _editar?.Invoke(id);
+            return;
+        }
+
         if (_alvo is not null)
             _vincular?.Invoke(_alvo);
     }

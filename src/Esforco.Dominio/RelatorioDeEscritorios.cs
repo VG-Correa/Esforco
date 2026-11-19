@@ -143,7 +143,14 @@ public static class RelatorioDeEscritorios
                 };
             }
 
-            var outros = OutrosDe(vinculados.Where(trecho => trecho.Vinculo!.Escritorio == id), reunioesDoEscritorio, agora);
+            var doEscritorio = vinculados.Where(trecho => trecho.Vinculo!.Escritorio == id).ToList();
+            var outros = OutrosDe(
+                doEscritorio,
+                reunioesDoEscritorio,
+                doEscritorio.Any(trecho => trecho.Vinculo!.Manual)
+                    ? periodo.Where(intervalo => intervalo.Escritorio.Trim() == id && (intervalo.EhPainelSplitC || EhChat(intervalo, id))).ToList()
+                    : [],
+                agora);
             if (outros.Count > 0)
             {
                 linhas[i] = linhas[i] with
@@ -181,22 +188,45 @@ public static class RelatorioDeEscritorios
             .ToList();
     }
 
+    /// <summary>
+    /// O trabalho vinculado só deixa de contar durante a reunião do mesmo escritório. O registro manual
+    /// completa o que o Esforço não viu: deixa de contar no horário que qualquer outro registro do mesmo
+    /// escritório já conta, seja reunião, painel, Chatwoot, trabalho vinculado ou outro registro manual.
+    /// </summary>
     private static List<OutroTrabalho> OutrosDe(
-        IEnumerable<TrechoDeEsforco> vinculados,
+        IReadOnlyList<TrechoDeEsforco> vinculados,
         IReadOnlyList<IntervaloDeEsforco> reunioes,
+        IReadOnlyList<IntervaloDeEsforco> painelEChat,
         DateTimeOffset agora)
     {
-        return vinculados
-            .GroupBy(trecho => trecho.Vinculo!.Categoria, StringComparer.OrdinalIgnoreCase)
-            .Select(grupo =>
-            {
-                var (contado, naReuniao) = PainelDuranteReuniao.Separar(
-                    grupo.Select(trecho => trecho.Intervalo),
-                    reunioes,
-                    agora);
-                var nome = grupo.Key.Length == 0 ? CadastroDeCategorias.SemCategoria : grupo.First().Vinculo!.Categoria;
-                return new OutroTrabalho(nome, contado, naReuniao);
-            })
+        var partes = new List<(string Categoria, TimeSpan Contado, TimeSpan NaReuniao)>();
+        var automaticos = new List<IntervaloDeEsforco>(reunioes);
+        automaticos.AddRange(painelEChat);
+        foreach (var trecho in vinculados)
+        {
+            if (trecho.Vinculo!.Manual)
+                continue;
+
+            var (contado, naReuniao) = PainelDuranteReuniao.Separar([trecho.Intervalo], reunioes, agora);
+            partes.Add((trecho.Vinculo.Categoria, contado, naReuniao));
+            automaticos.Add(trecho.Intervalo);
+        }
+
+        var manuais = vinculados.Where(trecho => trecho.Vinculo!.Manual).ToList();
+        if (manuais.Count > 0)
+        {
+            var ordenados = PainelDuranteReuniao.EmOrdem(manuais.Select(trecho => trecho.Intervalo)).ToList();
+            var separados = PainelDuranteReuniao.SepararManuais(ordenados, automaticos, agora);
+            for (var i = 0; i < ordenados.Count; i++)
+                partes.Add((ordenados[i].Manual?.Categoria ?? "", separados[i].Contado, separados[i].JaContado));
+        }
+
+        return partes
+            .GroupBy(parte => parte.Categoria, StringComparer.OrdinalIgnoreCase)
+            .Select(grupo => new OutroTrabalho(
+                grupo.Key.Length == 0 ? CadastroDeCategorias.SemCategoria : grupo.First().Categoria,
+                Somar(grupo.Select(parte => parte.Contado)),
+                Somar(grupo.Select(parte => parte.NaReuniao))))
             .OrderByDescending(item => item.Duracao + item.DuracaoNaReuniao)
             .ThenBy(item => item.Categoria, StringComparer.OrdinalIgnoreCase)
             .ToList();

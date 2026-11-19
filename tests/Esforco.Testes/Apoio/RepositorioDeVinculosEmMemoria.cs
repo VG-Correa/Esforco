@@ -10,6 +10,8 @@ internal sealed class RepositorioDeVinculosEmMemoria : IRepositorioDeVinculos
     private readonly Dictionary<long, string> _enderecos = [];
     private readonly Dictionary<string, string> _configuracoes = new(StringComparer.Ordinal);
     private readonly List<ContagemDeJanela> _contagens = [];
+    private readonly List<RegistroManual> _registros = [];
+    private long _proximoRegistro = 1;
     private long _proximaContagem = 1;
     private long _proximaCategoria = 1;
     private long _proximoVinculo = 1;
@@ -38,8 +40,38 @@ internal sealed class RepositorioDeVinculosEmMemoria : IRepositorioDeVinculos
                 _vinculos[i] = _vinculos[i] with { CategoriaId = trocarPor };
         }
 
+        for (var i = 0; i < _registros.Count; i++)
+        {
+            if (_registros[i].CategoriaId == id)
+                _registros[i] = _registros[i] with { CategoriaId = trocarPor };
+        }
+
         _categorias.RemoveAll(item => item.Id == id);
     }
+
+    public int LeiturasDeRegistrosManuais { get; private set; }
+
+    public IReadOnlyList<RegistroManual> ListarRegistrosManuais()
+    {
+        LeiturasDeRegistrosManuais++;
+        return _registros.ToList();
+    }
+
+    public RegistroManual AdicionarRegistroManual(RegistroManual registro)
+    {
+        var gravado = registro with { Id = _proximoRegistro++ };
+        _registros.Add(gravado);
+        return gravado;
+    }
+
+    public void AtualizarRegistroManual(RegistroManual registro)
+    {
+        var indice = _registros.FindIndex(item => item.Id == registro.Id);
+        if (indice >= 0)
+            _registros[indice] = registro;
+    }
+
+    public void ExcluirRegistroManual(long id) => _registros.RemoveAll(item => item.Id == id);
 
     public IReadOnlyList<VinculoDeEscritorio> ListarVinculos() => _vinculos.ToList();
 

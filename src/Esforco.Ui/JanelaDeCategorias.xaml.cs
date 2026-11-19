@@ -81,8 +81,7 @@ public partial class JanelaDeCategorias : Window
 
         Aviso.Text = "";
         _excluindo = item.Categoria;
-        var quantos = plano.EmUso == 1 ? "1 vínculo" : $"{plano.EmUso} vínculos";
-        TextoDaExclusao.Text = $"{item.Categoria.Nome} está em {quantos}. O que fazer com {(plano.EmUso == 1 ? "ele" : "eles")}?";
+        TextoDaExclusao.Text = $"{item.Categoria.Nome} está em {plano.Onde}. O que fazer com {(plano.EmUso == 1 ? "ele" : "eles")}?";
         var outras = _vinculos.ListarCategorias().Where(outra => outra.Id != item.Categoria.Id).ToList();
         Substituta.ItemsSource = outras;
         Substituta.SelectedIndex = -1;

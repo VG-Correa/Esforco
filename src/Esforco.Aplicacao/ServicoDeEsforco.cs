@@ -317,6 +317,10 @@ public sealed partial class ServicoDeEsforco
 
         lock (_gate)
         {
+            // Os registros manuais aparecem no Registro como um programa: excluir esse programa exclui todos eles.
+            if (string.Equals(nome, RegistroManual.NomeDoPrograma, StringComparison.Ordinal))
+                _vinculos?.ExcluirRegistrosManuais();
+
             _repositorio.ExcluirPrograma(nome);
             _preferencias = null;
             LimparEnderecosSemIntervalo();
@@ -327,6 +331,7 @@ public sealed partial class ServicoDeEsforco
     {
         lock (_gate)
         {
+            _vinculos?.ZerarRegistrosManuais(inicio, fim);
             var plano = CorteDePeriodo.Planejar(_repositorio.Listar(), inicio, fim, _relogio.Agora());
             foreach (var id in plano.Excluir)
                 _repositorio.ExcluirIntervalo(id);
@@ -346,7 +351,8 @@ public sealed partial class ServicoDeEsforco
     public ResumoDeEsforco ConsultarResumo(DateTime? diaInicial = null, DateTime? diaFinal = null)
     {
         var gravados = _repositorio.Listar();
-        var unidos = ContinuidadeDeReuniao.Unir(gravados);
+        var manuais = _vinculos?.IntervalosManuais() ?? [];
+        var unidos = ComManuais(ContinuidadeDeReuniao.Unir(gravados), manuais);
         var agora = _relogio.Agora();
         var lista = FiltrarDias(unidos, diaInicial, diaFinal);
         var nomes = new NomesDePainel(_repositorio.ListarCadastros());
@@ -365,8 +371,28 @@ public sealed partial class ServicoDeEsforco
                     .ToList(),
             })
             .ToList();
-        return new ResumoDeEsforco(EmLeitura, ordenados, preferencias, gravados.Count > 0);
+        return new ResumoDeEsforco(EmLeitura, ordenados, preferencias, gravados.Count > 0 || manuais.Count > 0);
     }
+
+    /// <summary>
+    /// Os registros manuais entram depois dos gravados, já na forma de intervalos. Vêm da lista em memória
+    /// do serviço de vínculos: nada é lido do banco a cada consulta e nada é gravado na tabela de intervalos.
+    /// </summary>
+    private static IReadOnlyList<IntervaloDeEsforco> ComManuais(
+        IReadOnlyList<IntervaloDeEsforco> unidos,
+        IReadOnlyList<IntervaloDeEsforco> manuais)
+    {
+        if (manuais.Count == 0)
+            return unidos;
+
+        var lista = new List<IntervaloDeEsforco>(unidos.Count + manuais.Count);
+        lista.AddRange(unidos);
+        lista.AddRange(manuais);
+        return lista;
+    }
+
+    private IReadOnlyList<IntervaloDeEsforco> UnidosComManuais() =>
+        ComManuais(ContinuidadeDeReuniao.Unir(_repositorio.Listar()), _vinculos?.IntervalosManuais() ?? []);
 
     public QuadroDeCalendario ConsultarCalendario(
         DateTime diaInicial,
@@ -376,7 +402,7 @@ public sealed partial class ServicoDeEsforco
         bool deDomingoASabado)
     {
         var agora = _relogio.Agora();
-        var unidos = ContinuidadeDeReuniao.Unir(_repositorio.Listar());
+        var unidos = UnidosComManuais();
         var nomes = new NomesDePainel(_repositorio.ListarCadastros());
         return CalendarioDeEsforco.Montar(
             unidos,
@@ -394,7 +420,7 @@ public sealed partial class ServicoDeEsforco
     public IReadOnlyList<LinhaDeEscritorio> ConsultarEscritorios(DateTime? diaInicial = null, DateTime? diaFinal = null)
     {
         var agora = _relogio.Agora();
-        var unidos = ContinuidadeDeReuniao.Unir(_repositorio.Listar());
+        var unidos = UnidosComManuais();
         var lista = FiltrarDias(unidos, diaInicial, diaFinal);
         var linhas = RelatorioDeEscritorios.Montar(lista, agora, _repositorio.ListarCadastros(), unidos, _vinculos?.Contexto());
         return ListaNegraDeEscritorios.Visiveis(linhas, _repositorio.ListarOcultacoes());

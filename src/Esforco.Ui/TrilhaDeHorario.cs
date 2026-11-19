@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using Esforco.Dominio;
 
 namespace Esforco.Ui;
 
@@ -16,6 +17,14 @@ public sealed class TrilhaDeHorario : Panel
     private const double AlturaTrilha = 54;
     private const double Gutter = 56;
     private const double FaixaDeHora = 18;
+
+    /// <summary>
+    /// Na coluna do dia, a beirada direita fica sempre sem faixa, para dar onde clicar e arrastar
+    /// mesmo num horário que já tem registro.
+    /// </summary>
+    public const double BeiradaLivre = 12;
+
+    private const double FolgaDoClique = 4;
 
     private static readonly Pen Grade = CriarGrade();
     private static readonly Pen CanetaAgora = CriarCanetaAgora();
@@ -38,22 +47,52 @@ public sealed class TrilhaDeHorario : Panel
 
     private MarcaDeAgora? _marca;
     private BlocoCalendarioVm? _apertado;
+    private double? _selecaoDe;
+    private double _selecaoAte;
+    private bool _arrastando;
 
     /// <summary>
-    /// O clique numa faixa abre a janelinha de vínculo. O aperto fica marcado como tratado para
-    /// que, na grade do mês, o botão do dia por baixo da faixa não abra o dia.
+    /// O clique numa faixa abre a janelinha de vínculo, ou a edição quando a faixa é um registro manual.
+    /// O aperto fica marcado como tratado para que, na grade do mês, o botão do dia por baixo da faixa
+    /// não abra o dia. Na coluna do dia, o aperto numa área vazia começa a escolha do horário de um
+    /// registro manual: soltar no mesmo ponto é um clique, arrastar define início e fim.
     /// </summary>
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
         _apertado = BlocoEm(e.OriginalSource);
         if (_apertado is not null)
+        {
             e.Handled = true;
+            return;
+        }
+
+        if (!ReferenceEquals(e.OriginalSource, this) || !ComecarSelecao(e.GetPosition(this).Y))
+            return;
+
+        e.Handled = true;
+        if (!CaptureMouse())
+            CancelarSelecao();
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (_selecaoDe is not null)
+            MoverSelecao(e.GetPosition(this).Y);
     }
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonUp(e);
+        if (_selecaoDe is not null)
+        {
+            e.Handled = true;
+            MoverSelecao(e.GetPosition(this).Y);
+            ConcluirSelecao();
+            return;
+        }
+
         var apertado = _apertado;
         _apertado = null;
         if (apertado is null)
@@ -68,6 +107,102 @@ public sealed class TrilhaDeHorario : Panel
     {
         base.OnMouseLeave(e);
         _apertado = null;
+    }
+
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        CancelarSelecao();
+    }
+
+    /// <summary>
+    /// Só a coluna do dia, nas vistas diária e semanal, aceita criar registro pelo clique.
+    /// </summary>
+    private bool AceitaCriar => Vertical && DiaInteiro && !Rotulos && !Compacto;
+
+    internal bool ComecarSelecao(double y)
+    {
+        if (!AceitaCriar || Dia() is not { PodeCriar: true })
+            return false;
+
+        _selecaoDe = y;
+        _selecaoAte = y;
+        _arrastando = false;
+        RedesenharSelecao();
+        return true;
+    }
+
+    internal void MoverSelecao(double y)
+    {
+        if (_selecaoDe is not double de)
+            return;
+
+        _selecaoAte = y;
+        if (Math.Abs(y - de) >= FolgaDoClique)
+            _arrastando = true;
+        RedesenharSelecao();
+    }
+
+    internal void ConcluirSelecao()
+    {
+        var escolha = Selecao();
+        var dia = Dia();
+        CancelarSelecao();
+        if (escolha is not (int inicio, int fim) || dia is null)
+            return;
+
+        // A janela do registro abre depois que o mouse terminou de ser solto.
+        Dispatcher.BeginInvoke(() => dia.Criar(inicio, fim));
+    }
+
+    private void CancelarSelecao()
+    {
+        if (_selecaoDe is null)
+            return;
+
+        _selecaoDe = null;
+        _arrastando = false;
+        if (IsMouseCaptured)
+            ReleaseMouseCapture();
+        RedesenharSelecao();
+    }
+
+    /// <summary>
+    /// O horário escolhido até aqui, em minutos do dia: meia hora a partir do clique,
+    /// ou o trecho arrastado.
+    /// </summary>
+    internal (int Inicio, int Fim)? Selecao()
+    {
+        if (_selecaoDe is not double de)
+            return null;
+
+        return _arrastando
+            ? SelecaoDeHorario.DoArrasto(MinutoEm(de), MinutoEm(_selecaoAte))
+            : SelecaoDeHorario.DoClique(MinutoEm(de));
+    }
+
+    private double MinutoEm(double y) => HoraInicial * 60 + y / AlturaDaHora * 60;
+
+    private void RedesenharSelecao()
+    {
+        if (_marca is not null)
+            _marca.InvalidateVisual();
+        else
+            InvalidateVisual();
+    }
+
+    private DiaCalendarioVm? Dia()
+    {
+        DependencyObject? atual = this;
+        while (atual is not null)
+        {
+            if (atual is FrameworkElement elemento && elemento.DataContext is DiaCalendarioVm dia)
+                return dia;
+
+            atual = VisualTreeHelper.GetParent(atual);
+        }
+
+        return null;
     }
 
     private static BlocoCalendarioVm? BlocoEm(object origem)
@@ -124,19 +259,7 @@ public sealed class TrilhaDeHorario : Panel
         }
     }
 
-    private bool DiaAtual()
-    {
-        DependencyObject? atual = this;
-        while (atual is not null)
-        {
-            if (atual is FrameworkElement elemento && elemento.DataContext is DiaCalendarioVm dia)
-                return dia.EhHoje;
-
-            atual = VisualTreeHelper.GetParent(atual);
-        }
-
-        return false;
-    }
+    private bool DiaAtual() => Dia() is { EhHoje: true };
 
     public int HoraInicial
     {
@@ -288,6 +411,21 @@ public sealed class TrilhaDeHorario : Panel
             0,
             FrameworkPropertyMetadataOptions.AffectsParentMeasure | FrameworkPropertyMetadataOptions.AffectsParentArrange));
 
+    public static bool GetManual(DependencyObject elemento) => (bool)elemento.GetValue(ManualProperty);
+
+    public static void SetManual(DependencyObject elemento, bool valor) => elemento.SetValue(ManualProperty, valor);
+
+    /// <summary>
+    /// Marca a faixa de um registro manual, que fica ao lado da faixa automática do mesmo horário.
+    /// </summary>
+    public static readonly DependencyProperty ManualProperty = DependencyProperty.RegisterAttached(
+        "Manual",
+        typeof(bool),
+        typeof(TrilhaDeHorario),
+        new FrameworkPropertyMetadata(
+            false,
+            FrameworkPropertyMetadataOptions.AffectsParentMeasure | FrameworkPropertyMetadataOptions.AffectsParentArrange));
+
     public static int GetTrilha(DependencyObject elemento) => (int)elemento.GetValue(TrilhaProperty);
 
     public static void SetTrilha(DependencyObject elemento, int valor) => elemento.SetValue(TrilhaProperty, valor);
@@ -307,12 +445,11 @@ public sealed class TrilhaDeHorario : Panel
 
         if (Vertical)
         {
-            var util = Math.Max(0, largura - (Rotulos ? Gutter : 0));
-            foreach (UIElement filho in InternalChildren)
-            {
-                var altura = AlturaNoTempo(filho);
-                filho.Measure(new Size(Math.Max(0, util - 4), altura));
-            }
+            var util = Math.Max(0, largura - (Rotulos ? Gutter : 0) - (AceitaCriar ? BeiradaLivre : 0));
+            var filhos = DoFundoParaAFrente();
+            var lugares = Lugares(filhos, util);
+            for (var i = 0; i < filhos.Count; i++)
+                filhos[i].Measure(new Size(Math.Max(0, lugares[i].Espaco - 4), AlturaNoTempo(filhos[i])));
 
             return new Size(largura, horas * AlturaDaHora);
         }
@@ -344,30 +481,18 @@ public sealed class TrilhaDeHorario : Panel
         if (Vertical)
         {
             var margem = Rotulos ? Gutter : 0;
-            var util = Math.Max(0, final.Width - margem);
-            var filhos = new List<UIElement>(InternalChildren.Count);
-            foreach (UIElement filho in InternalChildren)
-                filhos.Add(filho);
-
-            filhos.Sort(CompararDoFundoParaAFrente);
+            var util = Math.Max(0, final.Width - margem - (AceitaCriar ? BeiradaLivre : 0));
+            var filhos = DoFundoParaAFrente();
             for (var i = 0; i < filhos.Count; i++)
                 SetZIndex(filhos[i], i);
 
-            foreach (var filho in filhos)
+            var lugares = Lugares(filhos, util);
+            for (var i = 0; i < filhos.Count; i++)
             {
-                var atras = 0;
-                foreach (var outro in filhos)
-                {
-                    if (ReferenceEquals(outro, filho))
-                        break;
-                    if (Sobrepoe(outro, filho))
-                        atras++;
-                }
-
-                var recuo = Math.Min(atras * 16, Math.Max(0, util - 88));
+                var filho = filhos[i];
                 var inicio = InicioEmSegundos(filho);
                 var y = (inicio - origem * 60) / 3600.0 * AlturaDaHora;
-                filho.Arrange(new Rect(margem + recuo + 1, y, Math.Max(0, util - recuo - 3), AlturaNoTempo(filho)));
+                filho.Arrange(new Rect(margem + lugares[i].X + 1, y, Math.Max(0, lugares[i].Largura - 3), AlturaNoTempo(filho)));
             }
 
             return final;
@@ -399,6 +524,10 @@ public sealed class TrilhaDeHorario : Panel
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         if (Vertical)
         {
+            // Sem um fundo, a área vazia não recebe o clique que cria o registro manual.
+            if (AceitaCriar)
+                contexto.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ActualWidth, ActualHeight));
+
             var margem = Rotulos ? Gutter : 0;
             for (var hora = 0; hora <= horas; hora++)
             {
@@ -422,8 +551,12 @@ public sealed class TrilhaDeHorario : Panel
                 contexto.DrawText(texto, new Point(esquerda, topo));
             }
 
-            if (MarcarAgora && _marca is null)
-                DesenharAgora(contexto);
+            if (_marca is null)
+            {
+                if (MarcarAgora)
+                    DesenharAgora(contexto);
+                DesenharSelecao(contexto);
+            }
 
             return;
         }
@@ -486,13 +619,26 @@ public sealed class TrilhaDeHorario : Panel
     private static int DuracaoDe(UIElement elemento) =>
         Math.Max(0, FimEmSegundos(elemento) - InicioEmSegundos(elemento));
 
-    private static bool Sobrepoe(UIElement a, UIElement b)
+    private List<UIElement> DoFundoParaAFrente()
     {
-        var inicioA = InicioEmSegundos(a);
-        var fimA = FimEmSegundos(a);
-        var inicioB = InicioEmSegundos(b);
-        var fimB = FimEmSegundos(b);
-        return inicioA < fimB && inicioB < fimA;
+        var filhos = new List<UIElement>(InternalChildren.Count);
+        foreach (UIElement filho in InternalChildren)
+            filhos.Add(filho);
+
+        filhos.Sort(CompararDoFundoParaAFrente);
+        return filhos;
+    }
+
+    /// <summary>
+    /// A cascata das faixas que coincidem, e o registro manual ao lado da faixa automática do mesmo horário.
+    /// </summary>
+    private static IReadOnlyList<LugarDaFaixa> Lugares(List<UIElement> doFundoParaAFrente, double util)
+    {
+        var faixas = new List<FaixaNaColuna>(doFundoParaAFrente.Count);
+        foreach (var filho in doFundoParaAFrente)
+            faixas.Add(new FaixaNaColuna(InicioEmSegundos(filho), FimEmSegundos(filho), GetManual(filho)));
+
+        return ColunaDoCalendario.Distribuir(faixas, util);
     }
 
     private void DesenharAgora(DrawingContext contexto)
@@ -522,13 +668,74 @@ public sealed class TrilhaDeHorario : Panel
         return pen;
     }
 
-    private sealed class MarcaDeAgora(TrilhaDeHorario painel) : Adorner(painel)
+    /// <summary>
+    /// O horário que está sendo escolhido para o registro manual, por cima das faixas.
+    /// </summary>
+    private void DesenharSelecao(DrawingContext contexto)
     {
+        if (Selecao() is not (int inicio, int fim))
+            return;
+
+        var topo = (inicio - HoraInicial * 60) / 60.0 * AlturaDaHora;
+        var altura = Math.Max(2, (fim - inicio) / 60.0 * AlturaDaHora);
+        var area = new Rect(1, topo, Math.Max(0, ActualWidth - 3), altura);
+        contexto.DrawRoundedRectangle(FundoDaSelecao, CanetaDaSelecao, area, 4, 4);
+
+        var texto = new FormattedText(
+            $"{HoraDoDia.Escrever(inicio)} – {(fim >= 24 * 60 ? "24:00" : HoraDoDia.Escrever(fim))}",
+            CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            Fonte,
+            11,
+            TintaDaSelecao,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (texto.Width + 10 > area.Width)
+            return;
+
+        // Num trecho curto o horário fica logo acima, para não sair da área escolhida.
+        var y = altura >= texto.Height + 4 ? topo + 2 : Math.Max(0, topo - texto.Height - 1);
+        contexto.DrawText(texto, new Point(area.Left + 5, y));
+    }
+
+    private sealed class MarcaDeAgora : Adorner
+    {
+        private readonly TrilhaDeHorario _painel;
+
+        public MarcaDeAgora(TrilhaDeHorario painel)
+            : base(painel)
+        {
+            _painel = painel;
+
+            // A marca fica por cima da coluna só para ser vista: o clique tem de chegar à coluna.
+            IsHitTestVisible = false;
+        }
+
         protected override void OnRender(DrawingContext contexto)
         {
-            if (painel.MarcarAgora)
-                painel.DesenharAgora(contexto);
+            if (_painel.MarcarAgora)
+                _painel.DesenharAgora(contexto);
+            _painel.DesenharSelecao(contexto);
         }
+    }
+
+    private static readonly Brush FundoDaSelecao = Congelar(new SolidColorBrush(Color.FromArgb(0x38, 0x1F, 0x3D, 0x32)));
+    private static readonly Brush TintaDaSelecao = Congelar(new SolidColorBrush(Color.FromRgb(0x1F, 0x3D, 0x32)));
+    private static readonly Pen CanetaDaSelecao = CriarCanetaDaSelecao();
+
+    private static Brush Congelar(SolidColorBrush tinta)
+    {
+        tinta.Freeze();
+        return tinta;
+    }
+
+    private static Pen CriarCanetaDaSelecao()
+    {
+        var pen = new Pen(new SolidColorBrush(Color.FromRgb(0x1F, 0x3D, 0x32)), 1.5)
+        {
+            DashStyle = new DashStyle([3, 2], 0),
+        };
+        pen.Freeze();
+        return pen;
     }
 
     private static Pen CriarCanetaAgora()

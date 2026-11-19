@@ -14,7 +14,7 @@
     <StackPanel Margin="20">
         <TextBlock TextWrapping="Wrap"
                    Margin="0,0,0,16"
-                   Text="Apaga o tempo gravado nesse intervalo, em todos os programas. O que ficou fora dele permanece."/>
+                   Text="Apaga o tempo gravado nesse intervalo, em todos os programas e nos registros manuais. O que ficou fora dele permanece."/>
 
         <RadioButton x:Name="OpcaoHoje"
                      Content="Hoje"

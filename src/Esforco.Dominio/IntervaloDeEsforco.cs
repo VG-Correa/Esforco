@@ -76,6 +76,12 @@ public sealed class IntervaloDeEsforco
     /// </summary>
     public string EscritorioVinculado { get; private set; } = "";
 
+    /// <summary>
+    /// Preenchido só no intervalo montado a partir de um registro manual. Esse intervalo não está
+    /// na tabela de intervalos: o Id dele é o do registro manual com o sinal trocado.
+    /// </summary>
+    public MarcaDeRegistroManual? Manual { get; private set; }
+
     public DateTimeOffset Inicio { get; private set; }
 
     public DateTimeOffset? Fim { get; private set; }
@@ -135,6 +141,35 @@ public sealed class IntervaloDeEsforco
             false,
             inicio,
             null);
+    }
+
+    /// <summary>
+    /// O registro manual na forma que o Registro, o Calendário e o relatório de Escritórios entendem.
+    /// O título fica vazio para a descrição escrita pela pessoa nunca ser lida como reunião ou Chatwoot.
+    /// </summary>
+    public static IntervaloDeEsforco DoRegistroManual(RegistroManual registro, string? categoria)
+    {
+        ArgumentNullException.ThrowIfNull(registro);
+        var descricao = (registro.Descricao ?? "").Trim();
+        var fim = registro.Fim < registro.Inicio ? registro.Inicio : registro.Fim;
+        return new IntervaloDeEsforco(
+            -registro.Id,
+            RegistroManual.NomeDoPrograma,
+            "",
+            descricao.Length == 0 ? RegistroManual.SemDescricao : descricao,
+            (registro.Escritorio ?? "").Trim(),
+            "",
+            "",
+            "",
+            "",
+            TipoDeItem.Nenhum,
+            false,
+            false,
+            registro.Inicio,
+            fim)
+        {
+            Manual = new MarcaDeRegistroManual(registro.Id, registro.CategoriaId, (categoria ?? "").Trim(), descricao),
+        };
     }
 
     public static IntervaloDeEsforco Restaurar(
@@ -209,6 +244,7 @@ public sealed class IntervaloDeEsforco
             termino,
             Retomado);
         copia.DuranteReuniao = DuranteReuniao;
+        copia.Manual = Manual;
         return copia;
     }
 

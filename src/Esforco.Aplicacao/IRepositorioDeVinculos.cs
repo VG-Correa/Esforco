@@ -3,7 +3,7 @@ using Esforco.Dominio;
 namespace Esforco.Aplicacao;
 
 /// <summary>
-/// Guarda categorias, vínculos manuais e o endereço das abas vinculadas, em tabelas próprias.
+/// Guarda categorias, vínculos manuais, registros manuais e o endereço das abas vinculadas, em tabelas próprias.
 /// As tabelas que já existiam não são tocadas.
 /// </summary>
 public interface IRepositorioDeVinculos
@@ -15,10 +15,18 @@ public interface IRepositorioDeVinculos
     void RenomearCategoria(long id, string nome);
 
     /// <summary>
-    /// Exclui a categoria e, na mesma operação, troca a categoria dos vínculos que a usavam
-    /// por trocarPor, ou deixa esses vínculos sem categoria quando trocarPor é nulo.
+    /// Exclui a categoria e, na mesma operação, troca a categoria dos vínculos e dos registros manuais
+    /// que a usavam por trocarPor, ou deixa esses sem categoria quando trocarPor é nulo.
     /// </summary>
     void ExcluirCategoria(long id, long? trocarPor);
+
+    IReadOnlyList<RegistroManual> ListarRegistrosManuais();
+
+    RegistroManual AdicionarRegistroManual(RegistroManual registro);
+
+    void AtualizarRegistroManual(RegistroManual registro);
+
+    void ExcluirRegistroManual(long id);
 
     IReadOnlyList<VinculoDeEscritorio> ListarVinculos();
 

@@ -95,7 +95,7 @@ public sealed record VinculoDeEscritorio(
     public bool Casa(IntervaloDeEsforco intervalo, string? endereco)
     {
         ArgumentNullException.ThrowIfNull(intervalo);
-        if (!Igual(intervalo.Programa, Programa))
+        if (intervalo.Manual is not null || !Igual(intervalo.Programa, Programa))
             return false;
 
         return Alcance switch

@@ -66,6 +66,29 @@ internal static class Vinculos
         return intervalo;
     }
 
+    public static RegistroManual Registro(
+        long id,
+        string escritorio,
+        DateTimeOffset inicio,
+        DateTimeOffset fim,
+        string descricao = "",
+        long? categoria = null) =>
+        new(id, escritorio, categoria, descricao, inicio, fim, inicio, inicio);
+
+    /// <summary>
+    /// O registro manual já na forma de intervalo, como o serviço entrega às telas.
+    /// </summary>
+    public static IntervaloDeEsforco Manual(
+        long id,
+        string escritorio,
+        DateTimeOffset inicio,
+        DateTimeOffset fim,
+        string categoria = "",
+        string descricao = "") =>
+        IntervaloDeEsforco.DoRegistroManual(
+            Registro(id, escritorio, inicio, fim, descricao, categoria.Length == 0 ? null : 1),
+            categoria);
+
     public static IntervaloDeEsforco Painel(string escritorio, DateTimeOffset inicio, DateTimeOffset fim)
     {
         var intervalo = IntervaloDeEsforco.AbrirPainel(

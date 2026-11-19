@@ -1,0 +1,170 @@
+<Window x:Class="Esforco.Ui.JanelaDeRegistroManual"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Registro manual"
+        Width="480"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="#F6F4EF"
+        FontFamily="Segoe UI"
+        FontSize="13"
+        Foreground="#1C1B19"
+        WindowStartupLocation="CenterOwner"
+        PreviewKeyDown="AoTeclar">
+    <Window.Resources>
+        <Style x:Key="Rotulo" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,10,0,4"/>
+        </Style>
+        <!-- O escritório marcado fica com a mesma cor forte mesmo quando o cursor está em outro campo. -->
+        <Style x:Key="EscritorioDaLista" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="8,3"/>
+            <Setter Property="Foreground" Value="#1C1B19"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Fundo"
+                                Background="Transparent"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Fundo" Property="Background" Value="#F1EEE7"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Fundo" Property="Background" Value="#1F3D32"/>
+                                <Setter Property="Foreground" Value="#F7F6F2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <!-- Os botões ficam presos embaixo e os campos rolam: em tela baixa a janela não passa da tela. -->
+    <DockPanel Margin="20,16">
+        <StackPanel DockPanel.Dock="Bottom">
+            <TextBlock x:Name="Aviso"
+                       TextWrapping="Wrap"
+                       Foreground="#8A3B32"
+                       Margin="0,8,0,6"/>
+            <DockPanel>
+                <Button x:Name="BotaoExcluir"
+                        DockPanel.Dock="Left"
+                        Content="Excluir"
+                        Click="Excluir"
+                        Visibility="Collapsed"
+                        Style="{StaticResource BotaoSecundario}"
+                        Foreground="#8A3B32"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancelar"
+                            Click="Cancelar"
+                            Style="{StaticResource BotaoSecundario}"
+                            Margin="0,0,8,0"/>
+                    <Button x:Name="BotaoSalvar"
+                            Content="Salvar"
+                            IsDefault="True"
+                            Click="Confirmar"
+                            Style="{StaticResource BotaoPrimario}"/>
+                </StackPanel>
+            </DockPanel>
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Focusable="False">
+            <StackPanel>
+                <Border Style="{StaticResource Secao}">
+                    <StackPanel>
+                        <TextBlock x:Name="Cabecalho"
+                                   Text="Novo registro manual"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock TextWrapping="Wrap"
+                                   Foreground="#7A756C"
+                                   FontSize="12"
+                                   Margin="0,2,0,0"
+                                   Text="Tempo lançado à mão para um escritório. Não vem da leitura das janelas: vale com o Esforço parado. Entra em Outros trabalhos no relatório de Escritórios."/>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="Quando" Style="{StaticResource Rotulo}"/>
+                <StackPanel Orientation="Horizontal">
+                    <DatePicker x:Name="Dia"
+                                Width="130"
+                                SelectedDateFormat="Short"
+                                Language="pt-BR"
+                                VerticalAlignment="Center"
+                                SelectedDateChanged="AoMudarDia"
+                                ToolTip="Dia em que o registro começa"/>
+                    <TextBlock Text="das"
+                               Foreground="#7A756C"
+                               VerticalAlignment="Center"
+                               Margin="10,0,6,0"/>
+                    <TextBox x:Name="Inicio"
+                             Width="68"
+                             Style="{StaticResource Campo}"
+                             TextChanged="AoMudarHorario"
+                             ToolTip="Hora e minuto, como 14:30"/>
+                    <TextBlock Text="às"
+                               Foreground="#7A756C"
+                               VerticalAlignment="Center"
+                               Margin="8,0,6,0"/>
+                    <TextBox x:Name="Fim"
+                             Width="68"
+                             Style="{StaticResource Campo}"
+                             TextChanged="AoMudarHorario"
+                             ToolTip="Hora e minuto, como 15:00"/>
+                </StackPanel>
+                <CheckBox x:Name="TerminaNoDiaSeguinte"
+                          Content="Termina no dia seguinte"
+                          Margin="0,8,0,0"
+                          VerticalContentAlignment="Center"
+                          Checked="AoMudarOpcao"
+                          Unchecked="AoMudarOpcao"
+                          ToolTip="Marque quando o registro passa da meia-noite"/>
+                <TextBlock x:Name="Resumo"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="#7A756C"
+                           Margin="0,6,0,0"/>
+
+                <TextBlock Text="Escritório" Style="{StaticResource Rotulo}"/>
+                <TextBox x:Name="Busca"
+                         Style="{StaticResource Campo}"
+                         TextChanged="AoBuscar"
+                         PreviewKeyDown="AoTeclarNaBusca"
+                         ToolTip="Escreva um pedaço do nome ou do id"/>
+                <ListBox x:Name="ListaDeEscritorios"
+                         Height="100"
+                         Margin="0,4,0,0"
+                         Background="#FFFFFF"
+                         BorderBrush="#D5D0C6"
+                         DisplayMemberPath="Rotulo"
+                         SelectionChanged="AoEscolherEscritorio"
+                         ItemContainerStyle="{StaticResource EscritorioDaLista}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+                <TextBlock x:Name="SemEscritorios"
+                           Visibility="Collapsed"
+                           Foreground="#7A756C"
+                           TextWrapping="Wrap"
+                           Margin="0,4,0,0"/>
+
+                <TextBlock Text="Categoria (opcional)" Style="{StaticResource Rotulo}"/>
+                <ComboBox x:Name="CampoCategoria"
+                          IsEditable="True"
+                          IsTextSearchEnabled="True"
+                          Padding="6,4"
+                          ToolTip="Escolha uma categoria da sua lista ou escreva uma nova"/>
+
+                <TextBlock Text="Descrição (opcional)" Style="{StaticResource Rotulo}"/>
+                <TextBox x:Name="Descricao"
+                         Style="{StaticResource Campo}"
+                         MaxLength="200"
+                         ToolTip="O que foi feito, como aparece no Calendário e no Registro"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

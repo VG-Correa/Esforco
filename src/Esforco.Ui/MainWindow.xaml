@@ -113,6 +113,7 @@
             <Setter Property="local:TrilhaDeHorario.InicioSegundo" Value="{Binding InicioSegundo}"/>
             <Setter Property="local:TrilhaDeHorario.FimSegundo" Value="{Binding FimSegundo}"/>
             <Setter Property="local:TrilhaDeHorario.Trilha" Value="{Binding Trilha}"/>
+            <Setter Property="local:TrilhaDeHorario.Manual" Value="{Binding EhManual}"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="VerticalAlignment" Value="Stretch"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -132,26 +133,51 @@
                 <TextBlock Text="{Binding Titulo}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                 <TextBlock Text="{Binding Subtitulo}" TextWrapping="Wrap" Margin="0,2,0,0"/>
                 <TextBlock Text="{Binding Horario}" Foreground="#7A756C" Margin="0,2,0,0"/>
-                <TextBlock Text="Clique para vincular a um escritório"
+                <TextBlock Text="{Binding DicaDoClique}"
                            Foreground="#7A756C"
                            FontSize="11"
                            Margin="0,4,0,0"
                            Visibility="{Binding Clicavel, Converter={StaticResource BoleanoParaVisibilidade}}"/>
             </StackPanel>
         </DataTemplate>
+        <!-- O registro manual tem a cor do escritório, com listras por cima: é o que o separa do que o Esforço leu sozinho. -->
+        <DrawingBrush x:Key="Hachura"
+                      TileMode="Tile"
+                      Viewport="0,0,8,8"
+                      ViewportUnits="Absolute"
+                      Viewbox="0,0,8,8"
+                      ViewboxUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <GeometryDrawing Geometry="M0,8 L8,0 M-2,2 L2,-2 M6,10 L10,6">
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#47FFFFFF" Thickness="2"/>
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
         <DataTemplate x:Key="BlocoDoCalendario">
             <Border Background="{Binding Fundo}"
                     BorderBrush="#F4F1EA"
                     BorderThickness="1"
                     CornerRadius="4"
-                    Padding="5,2,4,2"
                     ClipToBounds="True">
                 <Border.ToolTip>
                     <ToolTip Content="{Binding}"
                              ContentTemplate="{StaticResource ConteudoDoBalao}"
                              DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"/>
                 </Border.ToolTip>
-                <StackPanel VerticalAlignment="Top">
+                <Grid>
+                <Rectangle Fill="{StaticResource Hachura}"
+                           RadiusX="3"
+                           RadiusY="3"
+                           Visibility="{Binding EhManual, Converter={StaticResource BoleanoParaVisibilidade}}"/>
+                <Rectangle Stroke="#F7F6F2"
+                           StrokeThickness="1.5"
+                           StrokeDashArray="3 2"
+                           RadiusX="3"
+                           RadiusY="3"
+                           Visibility="{Binding EhManual, Converter={StaticResource BoleanoParaVisibilidade}}"/>
+                <StackPanel VerticalAlignment="Top" Margin="5,2,4,2">
                     <TextBlock Text="{Binding Titulo}"
                                FontWeight="SemiBold"
                                FontSize="12"
@@ -182,19 +208,52 @@
                                Opacity="0.78"
                                TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
+                </Grid>
             </Border>
         </DataTemplate>
         <DataTemplate x:Key="FaixaCompacta">
             <Border Background="{Binding Fundo}"
                     CornerRadius="2"
-                    Height="6">
+                    Height="6"
+                    ClipToBounds="True">
                 <Border.ToolTip>
                     <ToolTip Content="{Binding}"
                              ContentTemplate="{StaticResource ConteudoDoBalao}"
                              DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"/>
                 </Border.ToolTip>
+                <Rectangle Fill="{StaticResource Hachura}"
+                           Visibility="{Binding EhManual, Converter={StaticResource BoleanoParaVisibilidade}}"/>
             </Border>
         </DataTemplate>
+        <Style x:Key="BotaoEditarLinha" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="#1F3D32"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE70F;"
+                                           Style="{StaticResource Icone}"
+                                           FontSize="11"
+                                           Margin="0,0,5,0"/>
+                                <TextBlock x:Name="Texto" Text="editar"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Texto" Property="TextDecorations" Value="Underline"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="PontoDeSituacao" TargetType="Ellipse">
             <Setter Property="Fill" Value="#B5AFA3"/>
             <Style.Triggers>
@@ -232,6 +291,11 @@
                            Style="{StaticResource TextoDoIntervalo}"
                            TextTrimming="CharacterEllipsis"/>
                 <TextBlock Grid.Column="4" Text="{Binding Janela}" Style="{StaticResource TextoDoIntervalo}"/>
+                <Button Grid.Column="4"
+                        Command="{Binding Editar}"
+                        Style="{StaticResource BotaoEditarLinha}"
+                        ToolTip="Alterar ou excluir este registro manual"
+                        Visibility="{Binding Manual, Converter={StaticResource BoleanoParaVisibilidade}}"/>
             </Grid>
         </DataTemplate>
         <DataTemplate x:Key="NoDaArvore">
@@ -555,6 +619,18 @@
                                     Style="{StaticResource BotaoModoTelas}"/>
                         </StackPanel>
                     </Border>
+                    <Button DockPanel.Dock="Left"
+                            Command="{Binding NovoRegistroManual}"
+                            Style="{StaticResource BotaoPrimario}"
+                            Padding="12,6"
+                            Margin="0,0,10,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Lança à mão um tempo para um escritório. Também dá para clicar ou arrastar numa área vazia do dia.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE710;" Style="{StaticResource Icone}" Margin="0,0,7,0"/>
+                            <TextBlock Text="Novo registro"/>
+                        </StackPanel>
+                    </Button>
                     <Border Background="#EBE7DE"
                             CornerRadius="8"
                             Padding="3"
@@ -826,9 +902,9 @@
                         <TextBlock Margin="0,2,12,0"
                                    Foreground="#7A756C"
                                    TextWrapping="Wrap">
-                            <Run Text="Painel, Chatwoot, reuniões e outros trabalhos ficam em colunas separadas. Outros trabalhos é o tempo que você ligou ao escritório por um vínculo manual. "/>
+                            <Run Text="Painel, Chatwoot, reuniões e outros trabalhos ficam em colunas separadas. Outros trabalhos é o tempo que você ligou ao escritório por um vínculo manual ou lançou num registro manual. "/>
                             <Run Text="Em azul" Foreground="#2F5D7C"/>
-                            <Run Text=" é o painel, o Chatwoot ou o trabalho vinculado feito durante a reunião do mesmo escritório e não entra no total. A parte é a fatia desse total: painel contado, Chatwoot contado, reuniões e outros trabalhos contados."/>
+                            <Run Text=" é o painel, o Chatwoot ou o trabalho vinculado feito durante a reunião do mesmo escritório, e o registro manual no horário que outro registro do mesmo escritório já conta: não entra no total. A parte é a fatia desse total: painel contado, Chatwoot contado, reuniões e outros trabalhos contados."/>
                         </TextBlock>
                     </StackPanel>
                 </DockPanel>
@@ -856,7 +932,7 @@
                             <TextBlock Grid.Column="1" Text="Painel" Style="{StaticResource Legenda}"/>
                             <TextBlock Grid.Column="2" Text="Chatwoot" Style="{StaticResource Legenda}"/>
                             <TextBlock Grid.Column="3" Text="Reuniões" Style="{StaticResource Legenda}"/>
-                            <TextBlock Grid.Column="4" Text="Outros trabalhos" Style="{StaticResource Legenda}" ToolTip="Tempo ligado a este escritório por vínculo manual, fora da reunião dele."/>
+                            <TextBlock Grid.Column="4" Text="Outros trabalhos" Style="{StaticResource Legenda}" ToolTip="Tempo ligado a este escritório por vínculo manual, fora da reunião dele, e tempo lançado em registro manual."/>
                             <TextBlock Grid.Column="5" Text="Total" Style="{StaticResource Legenda}" ToolTip="Painel contado, Chatwoot contado, reuniões e outros trabalhos. O azul não entra."/>
                             <TextBlock Grid.Column="6" Text="Parte" Style="{StaticResource Legenda}" ToolTip="Fatia desse total."/>
                         </Grid>
@@ -927,11 +1003,11 @@
                                                                    VerticalAlignment="Center"/>
                                                         <StackPanel Grid.Column="4" VerticalAlignment="Center">
                                                             <TextBlock Text="{Binding DuracaoOutros}"
-                                                                       ToolTip="Tempo ligado a este escritório por vínculo manual, fora da reunião dele."/>
+                                                                       ToolTip="Tempo ligado a este escritório por vínculo manual, fora da reunião dele, e tempo lançado em registro manual."/>
                                                             <TextBlock Text="{Binding DuracaoOutrosNaReuniao}"
                                                                        Foreground="#2F5D7C"
                                                                        FontSize="12"
-                                                                       ToolTip="Trabalho vinculado durante a reunião. Aparece aqui e não entra no total."
+                                                                       ToolTip="Trabalho vinculado durante a reunião, ou registro manual num horário que outro registro deste escritório já conta. Aparece aqui e não entra no total."
                                                                        Visibility="{Binding TemOutrosNaReuniao, Converter={StaticResource BoleanoParaVisibilidade}}"/>
                                                         </StackPanel>
                                                         <TextBlock Grid.Column="5"
@@ -1285,11 +1361,11 @@
                                 <StackPanel Grid.Column="4" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding TotalOutros}"
                                                FontWeight="SemiBold"
-                                               ToolTip="Tempo ligado a escritórios por vínculo manual, fora da reunião."/>
+                                               ToolTip="Tempo ligado a escritórios por vínculo manual, fora da reunião, e tempo lançado em registro manual."/>
                                     <TextBlock Text="{Binding TotalOutrosNaReuniao}"
                                                Foreground="#2F5D7C"
                                                FontSize="12"
-                                               ToolTip="Trabalho vinculado durante a reunião. Não entra neste total."
+                                               ToolTip="Trabalho vinculado durante a reunião, ou registro manual num horário que outro registro do escritório já conta. Não entra neste total."
                                                Visibility="{Binding TemOutrosNaReuniao, Converter={StaticResource BoleanoParaVisibilidade}}"/>
                                 </StackPanel>
                                 <TextBlock Grid.Column="5"

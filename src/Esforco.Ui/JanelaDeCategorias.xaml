@@ -16,7 +16,7 @@
         <TextBlock DockPanel.Dock="Top"
                    TextWrapping="Wrap"
                    Margin="0,0,0,14"
-                   Text="A categoria diz que tipo de trabalho foi feito num vínculo, como Suporte ou Implantação. No relatório de Escritórios, Outros trabalhos aparece agrupado por ela."/>
+                   Text="A categoria diz que tipo de trabalho foi feito num vínculo ou num registro manual, como Suporte ou Implantação. No relatório de Escritórios, Outros trabalhos aparece agrupado por ela."/>
 
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
             <Button DockPanel.Dock="Right"

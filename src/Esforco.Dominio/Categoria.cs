@@ -12,7 +12,10 @@ public sealed record EscolhaAoExcluirCategoria(long? TrocarPor)
     public static EscolhaAoExcluirCategoria Trocar(long outra) => new(outra);
 }
 
-public sealed record ExclusaoDeCategoria(bool Pode, string? Aviso, int EmUso, long? TrocarPor);
+/// <summary>
+/// EmUso soma os vínculos e os registros manuais da categoria. Onde diz isso por extenso, para a tela.
+/// </summary>
+public sealed record ExclusaoDeCategoria(bool Pode, string? Aviso, int EmUso, long? TrocarPor, string Onde = "");
 
 public static class CadastroDeCategorias
 {
@@ -51,7 +54,8 @@ public static class CadastroDeCategorias
         long id,
         IEnumerable<Categoria> categorias,
         IEnumerable<VinculoDeEscritorio> vinculos,
-        EscolhaAoExcluirCategoria? escolha)
+        EscolhaAoExcluirCategoria? escolha,
+        IEnumerable<RegistroManual>? registros = null)
     {
         ArgumentNullException.ThrowIfNull(categorias);
         ArgumentNullException.ThrowIfNull(vinculos);
@@ -59,28 +63,41 @@ public static class CadastroDeCategorias
         if (lista.All(item => item.Id != id))
             return new ExclusaoDeCategoria(false, "Essa categoria não existe mais.", 0, null);
 
-        var emUso = vinculos.Count(vinculo => vinculo.CategoriaId == id);
+        var emVinculos = vinculos.Count(vinculo => vinculo.CategoriaId == id);
+        var emRegistros = registros?.Count(registro => registro.CategoriaId == id) ?? 0;
+        var emUso = emVinculos + emRegistros;
         if (emUso == 0)
             return new ExclusaoDeCategoria(true, null, 0, null);
 
+        var onde = Onde(emVinculos, emRegistros);
         if (escolha is null)
         {
-            var quantos = emUso == 1 ? "1 vínculo" : $"{emUso} vínculos";
             return new ExclusaoDeCategoria(
                 false,
-                $"Esta categoria está em {quantos}. Escolha trocar por outra ou tirar a categoria deles.",
+                $"Esta categoria está em {onde}. Escolha trocar por outra ou tirar a categoria deles.",
                 emUso,
-                null);
+                null,
+                onde);
         }
 
         if (escolha.TrocarPor is long outra)
         {
             if (outra == id)
-                return new ExclusaoDeCategoria(false, "Escolha uma categoria diferente da que será excluída.", emUso, null);
+                return new ExclusaoDeCategoria(false, "Escolha uma categoria diferente da que será excluída.", emUso, null, onde);
             if (lista.All(item => item.Id != outra))
-                return new ExclusaoDeCategoria(false, "A categoria escolhida para a troca não existe mais.", emUso, null);
+                return new ExclusaoDeCategoria(false, "A categoria escolhida para a troca não existe mais.", emUso, null, onde);
         }
 
-        return new ExclusaoDeCategoria(true, null, emUso, escolha.TrocarPor);
+        return new ExclusaoDeCategoria(true, null, emUso, escolha.TrocarPor, onde);
+    }
+
+    private static string Onde(int vinculos, int registros)
+    {
+        var partes = new List<string>();
+        if (vinculos > 0)
+            partes.Add(vinculos == 1 ? "1 vínculo" : $"{vinculos} vínculos");
+        if (registros > 0)
+            partes.Add(registros == 1 ? "1 registro manual" : $"{registros} registros manuais");
+        return string.Join(" e ", partes);
     }
 }

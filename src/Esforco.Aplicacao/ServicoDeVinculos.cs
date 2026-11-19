@@ -6,6 +6,8 @@ public sealed record ResultadoDeVinculo(VinculoDeEscritorio? Vinculo, string? Av
 
 public sealed record ResultadoDeCategoria(Categoria? Categoria, string? Aviso);
 
+public sealed record ResultadoDeRegistroManual(RegistroManual? Registro, string? Aviso);
+
 /// <summary>
 /// Cadastro de categorias e de vínculos manuais, e o atalho que abre a janelinha.
 /// </summary>
@@ -18,6 +20,7 @@ public sealed class ServicoDeVinculos
     private readonly object _gate = new();
     private ContextoDeVinculos? _contexto;
     private IReadOnlyList<ContagemDeJanela>? _contagens;
+    private IReadOnlyList<RegistroManual>? _registros;
 
     public ServicoDeVinculos(IRepositorioDeVinculos repositorio, IRelogio relogio)
     {
@@ -101,13 +104,153 @@ public sealed class ServicoDeVinculos
                 id,
                 _repositorio.ListarCategorias(),
                 _repositorio.ListarVinculos(),
-                escolha);
+                escolha,
+                RegistrosManuais());
             if (!plano.Pode)
                 return plano;
 
             _repositorio.ExcluirCategoria(id, plano.TrocarPor);
             _contexto = null;
+            _registros = null;
             return plano;
+        }
+    }
+
+    /// <summary>
+    /// Os registros manuais. Ficam em memória até a próxima gravação, porque a tela pede a cada segundo.
+    /// </summary>
+    public IReadOnlyList<RegistroManual> RegistrosManuais()
+    {
+        lock (_gate)
+            return _registros ??= _repositorio.ListarRegistrosManuais();
+    }
+
+    public RegistroManual? RegistroManualDe(long id) =>
+        RegistrosManuais().FirstOrDefault(item => item.Id == id);
+
+    /// <summary>
+    /// Os registros manuais na forma de intervalos, para entrar no Registro, no Calendário e em Escritórios.
+    /// Cada chamada monta intervalos novos, porque as telas marcam neles o que aparece em azul.
+    /// </summary>
+    public IReadOnlyList<IntervaloDeEsforco> IntervalosManuais()
+    {
+        IReadOnlyList<RegistroManual> registros;
+        IReadOnlyList<Categoria> categorias;
+        lock (_gate)
+        {
+            registros = RegistrosManuais();
+            if (registros.Count == 0)
+                return [];
+            categorias = Contexto().Categorias;
+        }
+
+        var nomes = categorias.ToDictionary(item => item.Id, item => item.Nome);
+        var lista = new List<IntervaloDeEsforco>(registros.Count);
+        foreach (var registro in registros)
+        {
+            var categoria = registro.CategoriaId is long id && nomes.TryGetValue(id, out var nome) ? nome : "";
+            lista.Add(IntervaloDeEsforco.DoRegistroManual(registro, categoria));
+        }
+
+        return lista;
+    }
+
+    public ResultadoDeRegistroManual CriarRegistroManual(PedidoDeRegistroManual pedido)
+    {
+        ArgumentNullException.ThrowIfNull(pedido);
+        lock (_gate)
+        {
+            var aviso = Preparar(pedido, out var categoria);
+            if (aviso is not null)
+                return new ResultadoDeRegistroManual(null, aviso);
+
+            var agora = _relogio.Agora();
+            var criado = _repositorio.AdicionarRegistroManual(new RegistroManual(
+                0,
+                pedido.Escritorio.Trim(),
+                categoria,
+                NomesDePainel.Exibir(pedido.Descricao),
+                pedido.Inicio,
+                pedido.Fim,
+                agora,
+                agora));
+            _registros = null;
+            return new ResultadoDeRegistroManual(criado, null);
+        }
+    }
+
+    public ResultadoDeRegistroManual EditarRegistroManual(long id, PedidoDeRegistroManual pedido)
+    {
+        ArgumentNullException.ThrowIfNull(pedido);
+        lock (_gate)
+        {
+            var atual = RegistroManualDe(id);
+            if (atual is null)
+                return new ResultadoDeRegistroManual(null, "Esse registro não existe mais.");
+
+            var aviso = Preparar(pedido, out var categoria);
+            if (aviso is not null)
+                return new ResultadoDeRegistroManual(null, aviso);
+
+            var novo = atual with
+            {
+                Escritorio = pedido.Escritorio.Trim(),
+                CategoriaId = categoria,
+                Descricao = NomesDePainel.Exibir(pedido.Descricao),
+                Inicio = pedido.Inicio,
+                Fim = pedido.Fim,
+                AlteradoEm = _relogio.Agora(),
+            };
+            _repositorio.AtualizarRegistroManual(novo);
+            _registros = null;
+            return new ResultadoDeRegistroManual(novo, null);
+        }
+    }
+
+    public void ExcluirRegistroManual(long id)
+    {
+        lock (_gate)
+        {
+            _repositorio.ExcluirRegistroManual(id);
+            _registros = null;
+        }
+    }
+
+    /// <summary>
+    /// Exclui todos os registros manuais, como a exclusão de um programa no Registro. Devolve quantos saíram.
+    /// </summary>
+    public int ExcluirRegistrosManuais()
+    {
+        lock (_gate)
+        {
+            var registros = RegistrosManuais();
+            foreach (var registro in registros)
+                _repositorio.ExcluirRegistroManual(registro.Id);
+            _registros = null;
+            return registros.Count;
+        }
+    }
+
+    /// <summary>
+    /// Tira dos registros manuais o tempo de um período zerado: o que cabe inteiro sai,
+    /// o que passa de um lado é encurtado e o que passa dos dois vira dois.
+    /// </summary>
+    public void ZerarRegistrosManuais(DateTimeOffset inicio, DateTimeOffset fim)
+    {
+        lock (_gate)
+        {
+            var corte = CadastroDeRegistrosManuais.Cortar(RegistrosManuais(), inicio, fim);
+            if (corte.Excluir.Count == 0 && corte.Atualizar.Count == 0 && corte.Criar.Count == 0)
+                return;
+
+            var agora = _relogio.Agora();
+            foreach (var id in corte.Excluir)
+                _repositorio.ExcluirRegistroManual(id);
+            foreach (var registro in corte.Atualizar)
+                _repositorio.AtualizarRegistroManual(registro with { AlteradoEm = agora });
+            foreach (var registro in corte.Criar)
+                _repositorio.AdicionarRegistroManual(registro with { AlteradoEm = agora });
+            _registros = null;
         }
     }
 
@@ -288,15 +431,25 @@ public sealed class ServicoDeVinculos
             _repositorio.GravarConfiguracao(ChaveDoAtalho, atalho.ToString());
     }
 
+    /// <summary>
+    /// No registro manual a categoria vem escrita: vale a que já existe com esse nome, ou é criada.
+    /// </summary>
+    private string? Preparar(PedidoDeRegistroManual pedido, out long? categoria)
+    {
+        categoria = null;
+        return CadastroDeRegistrosManuais.Impedir(pedido) ?? Categorizar(pedido.Categoria, ref categoria);
+    }
+
     private string? Preparar(PedidoDeVinculo pedido, out long? categoria)
     {
         categoria = pedido.CategoriaId;
-        var aviso = VinculoDeEscritorio.Impedir(pedido);
-        if (aviso is not null)
-            return aviso;
+        return VinculoDeEscritorio.Impedir(pedido) ?? Categorizar(pedido.NovaCategoria, ref categoria);
+    }
 
+    private string? Categorizar(string? escrita, ref long? categoria)
+    {
         var categorias = _repositorio.ListarCategorias();
-        var nova = NomesDePainel.Exibir(pedido.NovaCategoria);
+        var nova = NomesDePainel.Exibir(escrita);
         if (nova.Length > 0)
         {
             var existente = CadastroDeCategorias.ComNome(nova, categorias);

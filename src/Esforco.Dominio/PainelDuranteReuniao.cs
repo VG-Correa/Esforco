@@ -99,6 +99,102 @@ public static class PainelDuranteReuniao
             if (Cruzamento(pedaco.Inicio, FimDe(pedaco, agora), Faixas(reunioes, agora)) > TimeSpan.Zero)
                 trecho.Origem.MarcarDuranteReuniao(true);
         }
+
+        MarcarManuais(pedacos, porId, agora);
+    }
+
+    /// <summary>
+    /// Para cada registro manual de um escritório, na ordem de <see cref="EmOrdem"/>, quanto conta e quanto
+    /// outro registro do mesmo escritório já conta no mesmo horário: os automáticos e os manuais anteriores.
+    /// </summary>
+    public static IReadOnlyList<(TimeSpan Contado, TimeSpan JaContado)> SepararManuais(
+        IEnumerable<IntervaloDeEsforco> manuais,
+        IEnumerable<IntervaloDeEsforco> automaticos,
+        DateTimeOffset agora)
+    {
+        ArgumentNullException.ThrowIfNull(manuais);
+        ArgumentNullException.ThrowIfNull(automaticos);
+        var faixas = Faixas(automaticos, agora);
+        var resultado = new List<(TimeSpan Contado, TimeSpan JaContado)>();
+        foreach (var manual in manuais)
+        {
+            var fim = FimDe(manual, agora);
+            var duracao = manual.DuracaoAte(agora);
+            var cruza = Cruzamento(manual.Inicio, fim, faixas);
+            if (cruza > duracao)
+                cruza = duracao;
+
+            resultado.Add((duracao - cruza, cruza));
+            if (fim > manual.Inicio)
+                faixas = Unir(faixas.Append((manual.Inicio, fim)));
+        }
+
+        return resultado;
+    }
+
+    /// <summary>
+    /// Entre dois registros manuais do mesmo escritório no mesmo horário, conta o que começa antes
+    /// e, no empate, o que foi criado antes.
+    /// </summary>
+    public static IEnumerable<IntervaloDeEsforco> EmOrdem(IEnumerable<IntervaloDeEsforco> manuais) =>
+        manuais.OrderBy(item => item.Inicio).ThenBy(item => item.Manual?.Id ?? 0);
+
+    private static void MarcarManuais(
+        List<TrechoDeEsforco> pedacos,
+        Dictionary<string, List<IntervaloDeEsforco>> reunioes,
+        DateTimeOffset agora)
+    {
+        var manuais = pedacos.Where(trecho => trecho.Vinculo is { Manual: true }).ToList();
+        if (manuais.Count == 0)
+            return;
+
+        var automaticos = new Dictionary<string, List<IntervaloDeEsforco>>(StringComparer.Ordinal);
+        foreach (var (id, lista) in reunioes)
+            automaticos[id] = [.. lista];
+
+        foreach (var trecho in pedacos)
+        {
+            string id;
+            if (trecho.Vinculo is VinculoAplicado vinculo)
+            {
+                if (vinculo.Manual)
+                    continue;
+                id = vinculo.Escritorio;
+            }
+            else if (trecho.Intervalo.EhPainelSplitC || trecho.Intervalo.EhChatwoot)
+            {
+                id = trecho.Intervalo.Escritorio.Trim();
+            }
+            else
+            {
+                continue;
+            }
+
+            if (id.Length == 0)
+                continue;
+
+            if (!automaticos.TryGetValue(id, out var grupo))
+            {
+                grupo = [];
+                automaticos[id] = grupo;
+            }
+
+            grupo.Add(trecho.Intervalo);
+        }
+
+        foreach (var grupo in manuais.GroupBy(trecho => trecho.Vinculo!.Escritorio, StringComparer.Ordinal))
+        {
+            var ordenados = EmOrdem(grupo.Select(trecho => trecho.Origem)).ToList();
+            var separados = SepararManuais(
+                ordenados,
+                automaticos.TryGetValue(grupo.Key, out var outros) ? outros : [],
+                agora);
+            for (var i = 0; i < ordenados.Count; i++)
+            {
+                if (separados[i].JaContado > TimeSpan.Zero)
+                    ordenados[i].MarcarDuranteReuniao(true);
+            }
+        }
     }
 
     private static DateTimeOffset FimDe(IntervaloDeEsforco intervalo, DateTimeOffset agora)
@@ -109,10 +205,13 @@ public static class PainelDuranteReuniao
 
     private static List<(DateTimeOffset Inicio, DateTimeOffset Fim)> Faixas(
         IEnumerable<IntervaloDeEsforco> reunioes,
-        DateTimeOffset agora)
+        DateTimeOffset agora) =>
+        Unir(reunioes.Select(item => (item.Inicio, Fim: FimDe(item, agora))));
+
+    private static List<(DateTimeOffset Inicio, DateTimeOffset Fim)> Unir(
+        IEnumerable<(DateTimeOffset Inicio, DateTimeOffset Fim)> itens)
     {
-        var ordenadas = reunioes
-            .Select(item => (item.Inicio, Fim: FimDe(item, agora)))
+        var ordenadas = itens
             .Where(item => item.Fim > item.Inicio)
             .OrderBy(item => item.Inicio)
             .ThenBy(item => item.Fim)

@@ -82,7 +82,10 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         UsarModoTelas = new Comando(() => DefinirModo(ModoDoCalendario.Telas), () => true);
         CopiarTransferencia = new Comando(AoCopiarTransferencia, () => Escritorios.Any(item => item.Id.Length > 0));
         AbrirOcultos = new Comando(AoAbrirOcultos, () => true);
+        NovoRegistroManual = new Comando(AoCriarRegistroManual, () => true);
     }
+
+    public ICommand NovoRegistroManual { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -447,10 +450,86 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
 
         DiasDoCalendario.Clear();
         foreach (var dia in quadro.Dias)
-            DiasDoCalendario.Add(new DiaCalendarioVm(dia, quadro.HoraInicial, quadro.HoraFinal, AbrirDia, AbrirVinculoDoBloco));
+        {
+            DiasDoCalendario.Add(new DiaCalendarioVm(
+                dia,
+                quadro.HoraInicial,
+                quadro.HoraFinal,
+                AbrirDia,
+                AbrirVinculoDoBloco,
+                CriarRegistroManual,
+                AlterarRegistroManual));
+        }
     }
 
     private void AbrirDia(DateTime dia) => AplicarFiltro(TipoDeFiltroDeDatas.Dia, dia.Date);
+
+    /// <summary>
+    /// Botão de novo registro: abre no dia à vista, ou em hoje quando hoje está no período,
+    /// com a meia hora que acabou de passar já sugerida.
+    /// </summary>
+    private void AoCriarRegistroManual()
+    {
+        var hoje = DateTime.Today;
+        var de = _diaInicial.Date <= _diaFinal.Date ? _diaInicial.Date : _diaFinal.Date;
+        var ate = _diaInicial.Date <= _diaFinal.Date ? _diaFinal.Date : _diaInicial.Date;
+        var dia = hoje >= de && hoje <= ate ? hoje : de;
+        var (inicio, fim) = SelecaoDeHorario.Sugerir(dia, DateTime.Now);
+        CriarRegistroManual(dia, inicio, fim);
+    }
+
+    /// <summary>
+    /// Clique ou arrasto numa área vazia do calendário, com o horário escolhido em minutos do dia.
+    /// </summary>
+    private void CriarRegistroManual(DateTime dia, int inicioMinuto, int fimMinuto) =>
+        MostrarRegistroManual(() => JanelaDeRegistroManual.Novo(_servico, _vinculos, dia, inicioMinuto, fimMinuto));
+
+    /// <summary>
+    /// Clique na faixa de um registro manual, ou em editar na linha dele no Registro.
+    /// </summary>
+    private void AlterarRegistroManual(long id)
+    {
+        var registro = _vinculos.RegistroManualDe(id);
+        if (registro is null)
+        {
+            RecarregarTudo();
+            return;
+        }
+
+        MostrarRegistroManual(() => JanelaDeRegistroManual.Alterar(_servico, _vinculos, registro));
+    }
+
+    private void MostrarRegistroManual(Func<JanelaDeRegistroManual> criar)
+    {
+        if (_janelinha is not null)
+        {
+            _janelinha.Activate();
+            return;
+        }
+
+        if (_abrindoVinculo)
+            return;
+
+        _abrindoVinculo = true;
+        bool salvou;
+        try
+        {
+            var janela = criar();
+            janela.Owner = Application.Current?.MainWindow;
+            janela.WindowStartupLocation = janela.Owner is null
+                ? WindowStartupLocation.CenterScreen
+                : WindowStartupLocation.CenterOwner;
+            janela.ShowDialog();
+            salvou = janela.Salvou;
+        }
+        finally
+        {
+            _abrindoVinculo = false;
+        }
+
+        if (salvou)
+            RecarregarTudo();
+    }
 
     /// <summary>
     /// Clique numa faixa do calendário. Numa faixa fundida o alvo cobre o período inteiro dela.
@@ -571,7 +650,8 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
                     || atual.Trilha != novo.Trilha
                     || atual.Titulo != novo.Titulo
                     || atual.Subtitulo != novo.Subtitulo
-                    || atual.Tipo != novo.Tipo)
+                    || atual.Tipo != novo.Tipo
+                    || atual.Manual != novo.Manual)
                     return false;
             }
         }
@@ -606,8 +686,12 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         {
             ModoDoCalendario.Programas => "Cada coluna é um dia e as horas descem nela. O título é o programa e o subtítulo é a tela. Clique numa faixa para vincular a um escritório.",
             ModoDoCalendario.Telas => "Cada coluna é um dia e as horas descem nela. O título é a tela e o subtítulo é o programa. Clique numa faixa para vincular a um escritório.",
-            _ => "Cada coluna é um dia e as horas descem nela. O símbolo marca painel, Chatwoot, reunião ou vínculo manual. O título é o escritório e o subtítulo é o que foi feito. Clique numa faixa para vincular a um escritório.",
+            _ => "Cada coluna é um dia e as horas descem nela. O símbolo marca painel, Chatwoot, reunião, vínculo manual ou registro manual. O título é o escritório e o subtítulo é o que foi feito. Clique numa faixa para vincular a um escritório.",
         };
+        if (!_calendarioEmGrade)
+            texto += " Clique ou arraste numa área vazia para criar um registro manual: ele aparece hachurado e o clique nele abre a edição.";
+        else
+            texto += " O botão Novo registro lança um tempo à mão.";
         if (_legendaDoCalendario == texto)
             return;
 
@@ -992,8 +1076,11 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
 
     private void ExcluirPrograma(string programa)
     {
+        var manual = string.Equals(programa, RegistroManual.NomeDoPrograma, StringComparison.Ordinal);
         var resposta = MessageBox.Show(
-            $"Excluir o tempo já gravado de {programa}? Se ele continuar na frente e a coleta não estiver pausada, um intervalo novo começa.",
+            manual
+                ? "Excluir todos os registros manuais, de todos os dias? Para excluir um só, clique em editar na linha dele."
+                : $"Excluir o tempo já gravado de {programa}? Se ele continuar na frente e a coleta não estiver pausada, um intervalo novo começa.",
             "Esforço",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning);
@@ -1001,7 +1088,10 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             return;
 
         _servico.ExcluirPrograma(programa);
-        Recarregar();
+        if (manual)
+            RecarregarTudo();
+        else
+            Recarregar();
     }
 
     private void Recarregar()
@@ -1038,8 +1128,10 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         return vm;
     }
 
-    private static LinhaIntervaloVm CriarLinha(IntervaloDeEsforco intervalo, DateTimeOffset agora) =>
-        new(
+    private LinhaIntervaloVm CriarLinha(IntervaloDeEsforco intervalo, DateTimeOffset agora)
+    {
+        var manual = intervalo.Manual?.Id;
+        return new LinhaIntervaloVm(
             intervalo.Id ?? 0,
             intervalo.Inicio,
             intervalo.Fim,
@@ -1050,14 +1142,28 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             JanelaDe(intervalo),
             intervalo.DuranteReuniao,
             intervalo.EhChatwoot,
-            intervalo.EscritorioVinculado.Length > 0);
+            intervalo.EscritorioVinculado.Length > 0,
+            manual is long id ? new Comando(() => AlterarRegistroManual(id), () => true) : null);
+    }
 
-    private static string EscritorioDe(IntervaloDeEsforco intervalo) =>
-        intervalo.EscritorioVinculado.Length > 0
+    private static string EscritorioDe(IntervaloDeEsforco intervalo)
+    {
+        if (intervalo.Manual is MarcaDeRegistroManual manual)
+        {
+            var escritorio = intervalo.EscritorioVinculado.Length > 0 ? intervalo.EscritorioVinculado : intervalo.Escritorio;
+            return manual.Categoria.Length == 0 ? escritorio : $"{escritorio} · {manual.Categoria}";
+        }
+
+        return intervalo.EscritorioVinculado.Length > 0
             ? $"{intervalo.EscritorioVinculado} (vínculo)"
             : string.IsNullOrWhiteSpace(intervalo.Escritorio) ? "vazio" : intervalo.Escritorio;
+    }
 
-    private static string JanelaDe(IntervaloDeEsforco intervalo) => intervalo.Minimizada ? "minimizada" : "ativa";
+    /// <summary>
+    /// O registro manual não tem janela: no lugar dela a linha mostra o botão de editar.
+    /// </summary>
+    private static string JanelaDe(IntervaloDeEsforco intervalo) =>
+        intervalo.Manual is not null ? "" : intervalo.Minimizada ? "minimizada" : "ativa";
 
     /// <summary>
     /// Traz a árvore da tela para o que o resumo diz, mexendo só no que mudou. Refazer tudo custa
@@ -1139,7 +1245,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         return true;
     }
 
-    private static void SincronizarLinhas(
+    private void SincronizarLinhas(
         IReadOnlyList<IntervaloDeEsforco> intervalos,
         ObservableCollection<LinhaIntervaloVm> linhas,
         DateTimeOffset agora)
@@ -1465,8 +1571,10 @@ public sealed class LinhaIntervaloVm : Observavel
         string janela,
         bool duranteReuniao,
         bool ehChat = false,
-        bool vinculado = false)
+        bool vinculado = false,
+        ICommand? editar = null)
     {
+        Editar = editar;
         Vinculado = vinculado;
         Id = id;
         Comeco = comeco;
@@ -1490,6 +1598,13 @@ public sealed class LinhaIntervaloVm : Observavel
     public bool EhChat { get; }
 
     public bool Vinculado { get; }
+
+    /// <summary>
+    /// Só o registro manual tem: abre a janela que altera ou exclui o registro.
+    /// </summary>
+    public ICommand? Editar { get; }
+
+    public bool Manual => Editar is not null;
 
     public bool EhDe(IntervaloDeEsforco intervalo) =>
         Id == (intervalo.Id ?? 0) && Comeco == intervalo.Inicio;
@@ -1526,7 +1641,11 @@ public sealed class LinhaIntervaloVm : Observavel
         }
     }
 
-    public string? Dica => !DuranteReuniao
+    public string? Dica => Manual
+        ? DuranteReuniao
+            ? "Este registro manual coincide com outro registro do mesmo escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total."
+            : "Registro manual. O tempo entra em Outros trabalhos no relatório de Escritórios."
+        : !DuranteReuniao
         ? Vinculado
             ? "Este escritório veio de um vínculo manual. O tempo entra em Outros trabalhos no relatório de Escritórios."
             : null

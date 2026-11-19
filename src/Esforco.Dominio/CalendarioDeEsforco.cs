@@ -18,7 +18,8 @@ public sealed record BlocoDeCalendario(
     string Tipo,
     string Chave,
     string Dica,
-    AlvoDeVinculo? Alvo = null);
+    AlvoDeVinculo? Alvo = null,
+    long? Manual = null);
 
 public sealed record LinhaDoDia(string Titulo, string Duracao, string Chave, int Minutos);
 
@@ -117,8 +118,8 @@ public static class CalendarioDeEsforco
     {
         var blocos = Juntar(fatias);
         var minutos = 0;
-        foreach (var bloco in blocos)
-            minutos += bloco.FimMinuto - bloco.InicioMinuto;
+        foreach (var grupo in blocos.GroupBy(bloco => bloco.Chave, StringComparer.Ordinal))
+            minutos += MinutosSemRepetir(grupo);
 
         return new DiaDeCalendario(
             dia,
@@ -131,24 +132,46 @@ public static class CalendarioDeEsforco
             LinhasDe(blocos));
     }
 
+    /// <summary>
+    /// O minuto em que o registro manual e outra faixa do mesmo título coincidem conta uma vez só.
+    /// Sem registro manual, as faixas de um título nunca se cruzam e a conta é a soma delas.
+    /// </summary>
+    private static int MinutosSemRepetir(IEnumerable<BlocoDeCalendario> blocos)
+    {
+        var total = 0;
+        var ate = int.MinValue;
+        foreach (var bloco in blocos.OrderBy(item => item.InicioMinuto).ThenBy(item => item.FimMinuto))
+        {
+            var inicio = Math.Max(bloco.InicioMinuto, ate);
+            if (bloco.FimMinuto > inicio)
+                total += bloco.FimMinuto - inicio;
+            if (bloco.FimMinuto > ate)
+                ate = bloco.FimMinuto;
+        }
+
+        return total;
+    }
+
     private static List<BlocoDeCalendario> Juntar(List<Fatia> fatias)
     {
         var porChave = new Dictionary<string, List<Fatia>>(StringComparer.Ordinal);
         foreach (var fatia in fatias)
         {
-            if (!porChave.TryGetValue(fatia.Descricao.Chave, out var lista))
+            if (!porChave.TryGetValue(fatia.Descricao.Grupo, out var lista))
             {
                 lista = [];
-                porChave[fatia.Descricao.Chave] = lista;
+                porChave[fatia.Descricao.Grupo] = lista;
             }
 
             lista.Add(fatia);
         }
 
-        var soltos = new List<(int Inicio, int Fim, int InicioSeg, int FimSeg, string Titulo, string Subtitulo, string Tipo, string Chave, AlvoDeVinculo Alvo)>();
-        foreach (var (chave, lista) in porChave)
+        var soltos = new List<(int Inicio, int Fim, int InicioSeg, int FimSeg, string Titulo, string Subtitulo, string Tipo, string Chave, AlvoDeVinculo Alvo, long? Manual)>();
+        foreach (var lista in porChave.Values)
         {
             lista.Sort((a, b) => a.Inicio.CompareTo(b.Inicio));
+            var chave = lista[0].Descricao.Chave;
+            var manual = lista[0].Descricao.Manual;
             var inicio = lista[0].Inicio;
             var fim = lista[0].Fim;
             var inicioSeg = lista[0].InicioSeg;
@@ -172,7 +195,7 @@ public static class CalendarioDeEsforco
                     continue;
                 }
 
-                soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave, alvo.Concluir()));
+                soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave, alvo.Concluir(), manual));
                 inicio = atual.Inicio;
                 fim = atual.Fim;
                 inicioSeg = atual.InicioSeg;
@@ -183,7 +206,7 @@ public static class CalendarioDeEsforco
                 alvo = new AlvoEmFaixa(atual);
             }
 
-            soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave, alvo.Concluir()));
+            soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave, alvo.Concluir(), manual));
         }
 
         soltos.Sort((a, b) =>
@@ -215,7 +238,8 @@ public static class CalendarioDeEsforco
                 item.Tipo,
                 item.Chave,
                 Dica(item.Tipo, item.Titulo, item.Subtitulo, item.Inicio, item.Fim),
-                item.Alvo));
+                item.Manual is null ? item.Alvo : null,
+                item.Manual));
         }
 
         return blocos;
@@ -272,7 +296,7 @@ public static class CalendarioDeEsforco
             .GroupBy(bloco => bloco.Chave)
             .Select(grupo =>
             {
-                var minutos = grupo.Sum(bloco => bloco.FimMinuto - bloco.InicioMinuto);
+                var minutos = MinutosSemRepetir(grupo);
                 return new LinhaDoDia(
                     grupo.First().Titulo,
                     TextoDeDuracao.De(TimeSpan.FromMinutes(minutos)),
@@ -300,6 +324,9 @@ public static class CalendarioDeEsforco
             ValidadeDeVinculo.Endereco(intervalo, enderecos),
             ResolvedorDeEscritorio.Identificar(intervalo, nomes),
             trecho.Vinculo?.VinculoId);
+        if (intervalo.Manual is MarcaDeRegistroManual manual)
+            return TentarDescreverManual(intervalo, manual, modo, nomes, ocultos, origem, out descricao);
+
         var tipo = Classificar(intervalo);
         if (trecho.Vinculo is not null && tipo.Length == 0)
             tipo = TipoVinculo;
@@ -353,6 +380,56 @@ public static class CalendarioDeEsforco
             ? "nome:" + NomesDePainel.Normalizar(titulo)
             : "id:" + id;
         descricao = new Descricao(titulo, Feito(intervalo, nomes), chave, tipo, origem);
+        return true;
+    }
+
+    private static bool TentarDescreverManual(
+        IntervaloDeEsforco intervalo,
+        MarcaDeRegistroManual manual,
+        ModoDoCalendario modo,
+        NomesDePainel nomes,
+        IReadOnlyList<OcultacaoDeEscritorio> ocultos,
+        Origem origem,
+        out Descricao descricao)
+    {
+        var escritorio = intervalo.Escritorio.Trim();
+        var rotulo = nomes.RotuloDeEscritorio(escritorio);
+        var feito = manual.Descricao.Length == 0
+            ? manual.Categoria.Length == 0 ? RegistroManual.NomeDoPrograma : manual.Categoria
+            : manual.Categoria.Length == 0 ? manual.Descricao : $"{manual.Categoria} · {manual.Descricao}";
+
+        if (modo == ModoDoCalendario.Programas)
+        {
+            descricao = new Descricao(
+                RegistroManual.NomeDoPrograma,
+                $"{rotulo} · {feito}",
+                "programa:" + RegistroManual.NomeDoPrograma,
+                TipoManual,
+                origem,
+                manual.Id);
+            return true;
+        }
+
+        if (modo == ModoDoCalendario.Telas)
+        {
+            var tela = manual.Descricao.Length == 0 ? rotulo : manual.Descricao;
+            descricao = new Descricao(
+                tela,
+                RegistroManual.NomeDoPrograma,
+                "tela:" + NomesDePainel.Normalizar(tela),
+                TipoManual,
+                origem,
+                manual.Id);
+            return true;
+        }
+
+        if (nomes.Oculto(escritorio, rotulo, ocultos))
+        {
+            descricao = default;
+            return false;
+        }
+
+        descricao = new Descricao(rotulo, feito, "id:" + escritorio, TipoManual, origem, manual.Id);
         return true;
     }
 
@@ -600,6 +677,8 @@ public static class CalendarioDeEsforco
 
     public const string TipoVinculo = "Vínculo";
 
+    public const string TipoManual = "Manual";
+
     private readonly record struct Origem(
         string Programa,
         string Titulo,
@@ -610,7 +689,20 @@ public static class CalendarioDeEsforco
         public bool Descoberto => Identificado is { VenceVinculo: true };
     }
 
-    private readonly record struct Descricao(string Titulo, string Subtitulo, string Chave, string Tipo, Origem Origem);
+    /// <summary>
+    /// Chave é o título para a cor e para a soma do dia. Grupo decide o que vira uma faixa só:
+    /// cada registro manual tem o seu, para nunca se fundir com a faixa automática do mesmo escritório.
+    /// </summary>
+    private readonly record struct Descricao(
+        string Titulo,
+        string Subtitulo,
+        string Chave,
+        string Tipo,
+        Origem Origem,
+        long? Manual = null)
+    {
+        public string Grupo => Manual is long id ? $"{Chave}\nmanual:{id}" : Chave;
+    }
 
     private readonly record struct Fatia(
         DateTime Dia,

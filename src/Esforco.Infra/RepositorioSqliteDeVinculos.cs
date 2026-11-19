@@ -83,6 +83,15 @@ public sealed class RepositorioSqliteDeVinculos : IRepositorioDeVinculos, IDispo
                 troca.ExecuteNonQuery();
             }
 
+            using (var troca = _conexao.CreateCommand())
+            {
+                troca.Transaction = transacao;
+                troca.CommandText = "UPDATE registros_manuais SET categoria_id = $nova WHERE categoria_id = $id;";
+                troca.Parameters.AddWithValue("$nova", trocarPor is long nova ? nova : DBNull.Value);
+                troca.Parameters.AddWithValue("$id", id);
+                troca.ExecuteNonQuery();
+            }
+
             using (var exclusao = _conexao.CreateCommand())
             {
                 exclusao.Transaction = transacao;
@@ -92,6 +101,79 @@ public sealed class RepositorioSqliteDeVinculos : IRepositorioDeVinculos, IDispo
             }
 
             transacao.Commit();
+        }
+    }
+
+    public IReadOnlyList<RegistroManual> ListarRegistrosManuais()
+    {
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = """
+                SELECT id, escritorio, categoria_id, descricao, inicio, fim, criado_em, alterado_em
+                FROM registros_manuais ORDER BY id ASC;
+                """;
+            using var leitor = comando.ExecuteReader();
+            var lista = new List<RegistroManual>();
+            while (leitor.Read())
+            {
+                lista.Add(new RegistroManual(
+                    leitor.GetInt64(0),
+                    leitor.GetString(1),
+                    leitor.IsDBNull(2) ? null : leitor.GetInt64(2),
+                    leitor.GetString(3),
+                    IsoDe(leitor.GetString(4)),
+                    IsoDe(leitor.GetString(5)),
+                    IsoDe(leitor.GetString(6)),
+                    IsoDe(leitor.GetString(7))));
+            }
+
+            return lista;
+        }
+    }
+
+    public RegistroManual AdicionarRegistroManual(RegistroManual registro)
+    {
+        ArgumentNullException.ThrowIfNull(registro);
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = """
+                INSERT INTO registros_manuais (escritorio, categoria_id, descricao, inicio, fim, criado_em, alterado_em)
+                VALUES ($escritorio, $categoria, $descricao, $inicio, $fim, $criado, $alterado);
+                SELECT last_insert_rowid();
+                """;
+            Preencher(comando, registro);
+            return registro with { Id = (long)comando.ExecuteScalar()! };
+        }
+    }
+
+    public void AtualizarRegistroManual(RegistroManual registro)
+    {
+        ArgumentNullException.ThrowIfNull(registro);
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = """
+                UPDATE registros_manuais
+                SET escritorio = $escritorio, categoria_id = $categoria, descricao = $descricao,
+                    inicio = $inicio, fim = $fim, criado_em = $criado, alterado_em = $alterado
+                WHERE id = $id;
+                """;
+            Preencher(comando, registro);
+            comando.Parameters.AddWithValue("$id", registro.Id);
+            comando.ExecuteNonQuery();
+        }
+    }
+
+    public void ExcluirRegistroManual(long id)
+    {
+        lock (_trava)
+        {
+            using var comando = _conexao.CreateCommand();
+            comando.CommandText = "DELETE FROM registros_manuais WHERE id = $id;";
+            comando.Parameters.AddWithValue("$id", id);
+            comando.ExecuteNonQuery();
         }
     }
 
@@ -333,6 +415,17 @@ public sealed class RepositorioSqliteDeVinculos : IRepositorioDeVinculos, IDispo
         comando.Parameters.AddWithValue("$registro", vinculo.SoRegistro ? 1 : 0);
         comando.Parameters.AddWithValue("$criado", Iso(vinculo.CriadoEm));
         comando.Parameters.AddWithValue("$encerrado", vinculo.EncerradoEm is DateTimeOffset fim ? Iso(fim) : DBNull.Value);
+    }
+
+    private static void Preencher(SqliteCommand comando, RegistroManual registro)
+    {
+        comando.Parameters.AddWithValue("$escritorio", registro.Escritorio);
+        comando.Parameters.AddWithValue("$categoria", registro.CategoriaId is long categoria ? categoria : DBNull.Value);
+        comando.Parameters.AddWithValue("$descricao", registro.Descricao);
+        comando.Parameters.AddWithValue("$inicio", Iso(registro.Inicio));
+        comando.Parameters.AddWithValue("$fim", Iso(registro.Fim));
+        comando.Parameters.AddWithValue("$criado", Iso(registro.CriadoEm));
+        comando.Parameters.AddWithValue("$alterado", Iso(registro.AlteradoEm));
     }
 
     private static VinculoDeEscritorio Ler(SqliteDataReader leitor)

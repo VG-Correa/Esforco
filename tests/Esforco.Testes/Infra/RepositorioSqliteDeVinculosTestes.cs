@@ -183,6 +183,157 @@ public sealed class RepositorioSqliteDeVinculosTestes : IDisposable
         Assert.Equal(TimeSpan.FromMinutes(30), linha.DuracaoOutros);
     }
 
+    [Fact]
+    public void Grava_altera_e_exclui_registro_manual_entre_uma_abertura_e_outra()
+    {
+        var inicio = new DateTimeOffset(2026, 11, 17, 9, 15, 30, TimeSpan.FromHours(-3));
+        RegistroManual primeiro;
+        RegistroManual segundo;
+        Categoria categoria;
+        using (var repositorio = new RepositorioSqliteDeVinculos(Banco))
+        {
+            categoria = repositorio.AdicionarCategoria("Suporte");
+            primeiro = repositorio.AdicionarRegistroManual(new RegistroManual(
+                0,
+                "2200",
+                categoria.Id,
+                "Ligação com o cliente",
+                inicio,
+                inicio.AddMinutes(45),
+                inicio.AddHours(3),
+                inicio.AddHours(3)));
+            segundo = repositorio.AdicionarRegistroManual(new RegistroManual(
+                0,
+                "3300",
+                null,
+                "",
+                inicio.AddHours(13),
+                inicio.AddHours(16),
+                inicio.AddHours(3),
+                inicio.AddHours(3)));
+        }
+
+        using (var leitura = new RepositorioSqliteDeVinculos(Banco))
+        {
+            Assert.True(primeiro.Id > 0 && segundo.Id > primeiro.Id);
+            Assert.Equal([primeiro, segundo], leitura.ListarRegistrosManuais().OrderBy(item => item.Id).ToArray());
+            leitura.AtualizarRegistroManual(primeiro with
+            {
+                Escritorio = "4400",
+                CategoriaId = null,
+                Descricao = "Visita",
+                Inicio = inicio.AddDays(1),
+                Fim = inicio.AddDays(1).AddMinutes(10),
+                AlteradoEm = inicio.AddDays(2),
+            });
+            leitura.ExcluirRegistroManual(segundo.Id);
+        }
+
+        using var conferencia = new RepositorioSqliteDeVinculos(Banco);
+        var registro = Assert.Single(conferencia.ListarRegistrosManuais());
+        Assert.Equal(
+            new RegistroManual(
+                primeiro.Id,
+                "4400",
+                null,
+                "Visita",
+                inicio.AddDays(1),
+                inicio.AddDays(1).AddMinutes(10),
+                inicio.AddHours(3),
+                inicio.AddDays(2)),
+            registro);
+        Assert.Equal(inicio.Offset, registro.CriadoEm.Offset);
+    }
+
+    [Fact]
+    public void Excluir_categoria_troca_ou_retira_a_categoria_tambem_dos_registros_manuais()
+    {
+        using var repositorio = new RepositorioSqliteDeVinculos(Banco);
+        var servico = new ServicoDeVinculos(repositorio, new RelogioManual { Instante = Vinculos.Em(17, 9, 0) });
+        var contratos = servico.CriarCategoria("Contratos").Categoria!;
+        var suporte = servico.CriarCategoria("Suporte").Categoria!;
+        var word = servico.Criar(Pedido("Word", contratos.Id)).Vinculo!;
+        var manual = servico.CriarRegistroManual(new PedidoDeRegistroManual("2200", "contratos", "Minuta", Vinculos.Em(17, 7, 0), Vinculos.Em(17, 8, 0))).Registro!;
+        var outro = servico.CriarRegistroManual(new PedidoDeRegistroManual("2200", "Suporte", "", Vinculos.Em(17, 8, 0), Vinculos.Em(17, 8, 30))).Registro!;
+
+        var semEscolha = servico.ExcluirCategoria(contratos.Id);
+
+        Assert.Equal(contratos.Id, manual.CategoriaId);
+        Assert.False(semEscolha.Pode);
+        Assert.Equal(2, semEscolha.EmUso);
+        Assert.Equal("1 vínculo e 1 registro manual", semEscolha.Onde);
+
+        Assert.True(servico.ExcluirCategoria(contratos.Id, EscolhaAoExcluirCategoria.Trocar(suporte.Id)).Pode);
+
+        Assert.All(repositorio.ListarRegistrosManuais(), registro => Assert.Equal(suporte.Id, registro.CategoriaId));
+        Assert.Equal(suporte.Id, Assert.Single(repositorio.ListarVinculos()).CategoriaId);
+
+        Assert.True(servico.ExcluirCategoria(suporte.Id, EscolhaAoExcluirCategoria.Retirar).Pode);
+
+        var registros = repositorio.ListarRegistrosManuais().OrderBy(item => item.Id).ToList();
+        Assert.Equal([manual.Id, outro.Id], registros.Select(item => item.Id).ToArray());
+        Assert.All(registros, registro => Assert.Null(registro.CategoriaId));
+        Assert.Equal(word.Id, Assert.Single(repositorio.ListarVinculos()).Id);
+        Assert.Equal("Minuta", registros[0].Descricao);
+    }
+
+    [Fact]
+    public void Registros_manuais_ficam_em_tabela_propria_e_nao_tocam_em_nenhuma_tabela_que_ja_existia()
+    {
+        var inicio = new DateTimeOffset(2026, 11, 17, 9, 0, 0, TimeSpan.FromHours(-3));
+        using var intervalos = new RepositorioSqliteDeIntervalos(Banco);
+        var antigo = IntervaloDeEsforco.Abrir("Word", "contrato.docx - Word", "contrato.docx", "", false, inicio);
+        intervalos.Adicionar(antigo);
+        antigo.Fechar(inicio.AddMinutes(30));
+        intervalos.SalvarFechamento(antigo);
+        intervalos.DefinirNomeDeEscritorio("2200", "NTM");
+        using var vinculos = new RepositorioSqliteDeVinculos(Banco);
+        var servico = new ServicoDeVinculos(vinculos, new RelogioManual { Instante = inicio.AddHours(1) });
+        servico.Criar(Pedido("Excel", null));
+        servico.SalvarContagem("Discord", "amigos - Discord", AlcanceDaContagem.Janela, ModoDeContagem.EnquantoAberta);
+        var esquemaAntes = Esquema();
+        var linhasAntes = Linhas();
+        var outrasAntes = TabelasForaDosRegistrosManuais();
+
+        var criado = servico.CriarRegistroManual(new PedidoDeRegistroManual("2200", "", "Ligação", inicio.AddHours(2), inicio.AddHours(4))).Registro!;
+        servico.EditarRegistroManual(criado.Id, new PedidoDeRegistroManual("2200", "", "Visita", inicio.AddHours(2), inicio.AddHours(5)));
+        servico.ZerarRegistrosManuais(inicio.AddHours(3), inicio.AddHours(4));
+        var depoisDoCorte = vinculos.ListarRegistrosManuais().Count;
+        servico.ExcluirRegistrosManuais();
+
+        Assert.Equal(2, depoisDoCorte);
+        Assert.Empty(vinculos.ListarRegistrosManuais());
+        Assert.Equal(esquemaAntes, Esquema());
+        Assert.Equal(linhasAntes, Linhas());
+        Assert.Equal(outrasAntes, TabelasForaDosRegistrosManuais());
+        Assert.Contains(outrasAntes, linha => linha.StartsWith("vinculos", StringComparison.Ordinal));
+        var gravado = Assert.Single(intervalos.Listar());
+        Assert.Equal((inicio, inicio.AddMinutes(30)), (gravado.Inicio, gravado.Fim));
+    }
+
+    [Fact]
+    public void Banco_que_ja_tinha_vinculos_ganha_a_tabela_de_registros_manuais_sem_perder_nada()
+    {
+        long vinculo;
+        using (var antes = new RepositorioSqliteDeVinculos(Banco))
+            vinculo = new ServicoDeVinculos(antes, new RelogioManual { Instante = Vinculos.Em(17, 9, 0) }).Criar(Pedido("Word", null)).Vinculo!.Id;
+
+        SqliteConnection.ClearAllPools();
+        using (var conexao = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Banco }.ToString()))
+        {
+            conexao.Open();
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = "DROP TABLE registros_manuais;";
+            comando.ExecuteNonQuery();
+        }
+
+        SqliteConnection.ClearAllPools();
+        using var depois = new RepositorioSqliteDeVinculos(Banco);
+
+        Assert.Empty(depois.ListarRegistrosManuais());
+        Assert.Equal(vinculo, Assert.Single(depois.ListarVinculos()).Id);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
@@ -236,6 +387,42 @@ public sealed class RepositorioSqliteDeVinculosTestes : IDisposable
                 var valores = new object[leitor.FieldCount];
                 leitor.GetValues(valores);
                 lista.Add(tabela + ": " + string.Join("|", valores));
+            }
+        }
+
+        return lista;
+    }
+
+    /// <summary>
+    /// Formato e conteúdo de todas as tabelas, menos a dos registros manuais.
+    /// </summary>
+    private List<string> TabelasForaDosRegistrosManuais()
+    {
+        using var conexao = Abrir();
+        var tabelas = new List<(string Nome, string Sql)>();
+        using (var comando = conexao.CreateCommand())
+        {
+            comando.CommandText = "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;";
+            using var leitor = comando.ExecuteReader();
+            while (leitor.Read())
+            {
+                if (leitor.GetString(0) != "registros_manuais")
+                    tabelas.Add((leitor.GetString(0), leitor.GetString(1)));
+            }
+        }
+
+        var lista = new List<string>();
+        foreach (var (nome, sql) in tabelas)
+        {
+            lista.Add(nome + ": " + sql);
+            using var comando = conexao.CreateCommand();
+            comando.CommandText = $"SELECT * FROM {nome} ORDER BY 1;";
+            using var leitor = comando.ExecuteReader();
+            while (leitor.Read())
+            {
+                var valores = new object[leitor.FieldCount];
+                leitor.GetValues(valores);
+                lista.Add(nome + " = " + string.Join("|", valores));
             }
         }
 
