@@ -26,7 +26,15 @@ public static class PainelDuranteReuniao
         return (contado, naReuniao);
     }
 
-    public static void Marcar(IEnumerable<IntervaloDeEsforco> intervalos, NomesDePainel nomes, DateTimeOffset agora)
+    /// <summary>
+    /// Marca em azul o painel e o Chatwoot usados durante a reunião do mesmo escritório.
+    /// Com os trechos, o trabalho vinculado à mão entra na mesma regra.
+    /// </summary>
+    public static void Marcar(
+        IEnumerable<IntervaloDeEsforco> intervalos,
+        NomesDePainel nomes,
+        DateTimeOffset agora,
+        IEnumerable<TrechoDeEsforco>? trechos = null)
     {
         ArgumentNullException.ThrowIfNull(intervalos);
         ArgumentNullException.ThrowIfNull(nomes);
@@ -65,6 +73,31 @@ public static class PainelDuranteReuniao
 
             if (Cruzamento(intervalo.Inicio, FimDe(intervalo, agora), Faixas(reunioes, agora)) > TimeSpan.Zero)
                 intervalo.MarcarDuranteReuniao(true);
+        }
+
+        if (trechos is null)
+            return;
+
+        var pedacos = trechos.ToList();
+        foreach (var trecho in pedacos)
+        {
+            trecho.Origem.MarcarVinculo(null);
+            if (!trecho.Origem.EhPainelSplitC && !trecho.Origem.EhChatwoot)
+                trecho.Origem.MarcarDuranteReuniao(false);
+        }
+
+        foreach (var trecho in pedacos)
+        {
+            if (trecho.Vinculo is not VinculoAplicado vinculo)
+                continue;
+
+            trecho.Origem.MarcarVinculo(nomes.RotuloDeEscritorio(vinculo.Escritorio));
+            if (!porId.TryGetValue(vinculo.Escritorio, out var reunioes))
+                continue;
+
+            var pedaco = trecho.Intervalo;
+            if (Cruzamento(pedaco.Inicio, FimDe(pedaco, agora), Faixas(reunioes, agora)) > TimeSpan.Zero)
+                trecho.Origem.MarcarDuranteReuniao(true);
         }
     }
 

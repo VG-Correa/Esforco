@@ -2,12 +2,13 @@ using Esforco.Dominio;
 
 namespace Esforco.Aplicacao;
 
-public sealed class ServicoDeEsforco
+public sealed partial class ServicoDeEsforco
 {
     private readonly ILeitorDeJanelaDaFrente _leitor;
     private readonly IRepositorioDeIntervalos _repositorio;
     private readonly IFonteDeRegrasDeEscritorio _regras;
     private readonly IRelogio _relogio;
+    private readonly ServicoDeVinculos? _vinculos;
     private readonly object _gate = new();
     public static readonly TimeSpan FolgaDeAusencia = TimeSpan.FromSeconds(15);
 
@@ -23,12 +24,14 @@ public sealed class ServicoDeEsforco
         ILeitorDeJanelaDaFrente leitor,
         IRepositorioDeIntervalos repositorio,
         IFonteDeRegrasDeEscritorio regras,
-        IRelogio relogio)
+        IRelogio relogio,
+        ServicoDeVinculos? vinculos = null)
     {
         _leitor = leitor;
         _repositorio = repositorio;
         _regras = regras;
         _relogio = relogio;
+        _vinculos = vinculos;
     }
 
     public bool EmLeitura
@@ -131,6 +134,17 @@ public sealed class ServicoDeEsforco
                 if (!_emLeitura || _suspenso || amostra is null)
                     return;
 
+                if (EhJanelinha(amostra))
+                {
+                    if (_segura is null)
+                        return;
+                    amostra = _segura;
+                }
+                else
+                {
+                    _ultimaAmostra = amostra;
+                }
+
                 var agora = _relogio.Agora();
                 CortarSeHouveAusencia(agora);
                 var titulo = (amostra.Titulo ?? "").Trim();
@@ -212,6 +226,8 @@ public sealed class ServicoDeEsforco
                 }
 
                 _repositorio.Adicionar(novo);
+                if (local is null && endereco.Length > 0)
+                    _vinculos?.GuardarEnderecoSeVinculado(novo, endereco);
                 if (InterpretadorDeReuniao.Ler(titulo) is not null)
                     _ultimaVistaDaReuniao = agora;
             }
@@ -241,6 +257,7 @@ public sealed class ServicoDeEsforco
         {
             _repositorio.ExcluirPrograma(nome);
             _preferencias = null;
+            LimparEnderecosSemIntervalo();
         }
     }
 
@@ -259,6 +276,8 @@ public sealed class ServicoDeEsforco
                 if (intervalo.Fim is not null)
                     _repositorio.SalvarFechamento(intervalo);
             }
+
+            LimparEnderecosSemIntervalo();
         }
     }
 
@@ -269,7 +288,8 @@ public sealed class ServicoDeEsforco
         var agora = _relogio.Agora();
         var lista = FiltrarDias(unidos, diaInicial, diaFinal);
         var nomes = new NomesDePainel(_repositorio.ListarCadastros());
-        PainelDuranteReuniao.Marcar(lista, nomes, agora);
+        var trechos = AplicadorDeVinculos.Aplicar(lista, _vinculos?.Contexto(), nomes, agora, unidos);
+        PainelDuranteReuniao.Marcar(lista, nomes, agora, trechos);
         var grupos = AgrupadorDeEsforco.Agrupar(lista, agora, nomes);
         IReadOnlyDictionary<string, PreferenciaDePrograma> preferencias;
         lock (_gate)
@@ -305,7 +325,8 @@ public sealed class ServicoDeEsforco
             nomes,
             emGrade,
             deDomingoASabado,
-            _repositorio.ListarOcultacoes());
+            _repositorio.ListarOcultacoes(),
+            _vinculos?.Contexto());
     }
 
     public IReadOnlyList<LinhaDeEscritorio> ConsultarEscritorios(DateTime? diaInicial = null, DateTime? diaFinal = null)
@@ -313,7 +334,7 @@ public sealed class ServicoDeEsforco
         var agora = _relogio.Agora();
         var unidos = ContinuidadeDeReuniao.Unir(_repositorio.Listar());
         var lista = FiltrarDias(unidos, diaInicial, diaFinal);
-        var linhas = RelatorioDeEscritorios.Montar(lista, agora, _repositorio.ListarCadastros(), unidos);
+        var linhas = RelatorioDeEscritorios.Montar(lista, agora, _repositorio.ListarCadastros(), unidos, _vinculos?.Contexto());
         return ListaNegraDeEscritorios.Visiveis(linhas, _repositorio.ListarOcultacoes());
     }
 

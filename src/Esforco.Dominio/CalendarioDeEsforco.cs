@@ -17,7 +17,8 @@ public sealed record BlocoDeCalendario(
     string Subtitulo,
     string Tipo,
     string Chave,
-    string Dica);
+    string Dica,
+    AlvoDeVinculo? Alvo = null);
 
 public sealed record LinhaDoDia(string Titulo, string Duracao, string Chave, int Minutos);
 
@@ -51,11 +52,13 @@ public static class CalendarioDeEsforco
         NomesDePainel nomes,
         bool emGrade,
         bool deDomingoASabado,
-        IEnumerable<OcultacaoDeEscritorio>? ocultos = null)
+        IEnumerable<OcultacaoDeEscritorio>? ocultos = null,
+        ContextoDeVinculos? vinculos = null)
     {
         ArgumentNullException.ThrowIfNull(intervalos);
         ArgumentNullException.ThrowIfNull(nomes);
         var listaOcultos = ocultos?.ToList() ?? [];
+        var enderecos = vinculos?.Enderecos;
 
         var inicio = inicioPeriodo.Date;
         var fim = fimPeriodo.Date;
@@ -64,12 +67,12 @@ public static class CalendarioDeEsforco
 
         var grade = emGrade || (fim - inicio).Days >= 7;
         var fatias = new List<Fatia>();
-        foreach (var intervalo in intervalos)
+        foreach (var trecho in AplicadorDeVinculos.Aplicar(intervalos, vinculos, nomes, agora))
         {
-            if (!TentarDescrever(intervalo, modo, nomes, listaOcultos, out var descricao))
+            if (!TentarDescrever(trecho, modo, nomes, listaOcultos, enderecos, out var descricao))
                 continue;
 
-            foreach (var fatia in Fatiar(intervalo, inicio, fim, agora, descricao))
+            foreach (var fatia in Fatiar(trecho.Intervalo, inicio, fim, agora, descricao))
                 fatias.Add(fatia);
         }
 
@@ -142,7 +145,7 @@ public static class CalendarioDeEsforco
             lista.Add(fatia);
         }
 
-        var soltos = new List<(int Inicio, int Fim, int InicioSeg, int FimSeg, string Titulo, string Subtitulo, string Tipo, string Chave)>();
+        var soltos = new List<(int Inicio, int Fim, int InicioSeg, int FimSeg, string Titulo, string Subtitulo, string Tipo, string Chave, AlvoDeVinculo Alvo)>();
         foreach (var (chave, lista) in porChave)
         {
             lista.Sort((a, b) => a.Inicio.CompareTo(b.Inicio));
@@ -153,6 +156,7 @@ public static class CalendarioDeEsforco
             var titulo = lista[0].Descricao.Titulo;
             var votos = Voto(lista[0]);
             var tipos = TipoVoto(lista[0]);
+            var alvo = new AlvoEmFaixa(lista[0]);
             for (var i = 1; i < lista.Count; i++)
             {
                 var atual = lista[i];
@@ -164,10 +168,11 @@ public static class CalendarioDeEsforco
                         fimSeg = atual.FimSeg;
                     Somar(votos, atual);
                     SomarTipo(tipos, atual);
+                    alvo.Juntar(atual);
                     continue;
                 }
 
-                soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave));
+                soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave, alvo.Concluir()));
                 inicio = atual.Inicio;
                 fim = atual.Fim;
                 inicioSeg = atual.InicioSeg;
@@ -175,9 +180,10 @@ public static class CalendarioDeEsforco
                 titulo = atual.Descricao.Titulo;
                 votos = Voto(atual);
                 tipos = TipoVoto(atual);
+                alvo = new AlvoEmFaixa(atual);
             }
 
-            soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave));
+            soltos.Add((inicio, fim, inicioSeg, fimSeg, titulo, SubtituloDe(votos), TipoDe(tipos), chave, alvo.Concluir()));
         }
 
         soltos.Sort((a, b) =>
@@ -208,7 +214,8 @@ public static class CalendarioDeEsforco
                 item.Subtitulo,
                 item.Tipo,
                 item.Chave,
-                Dica(item.Tipo, item.Titulo, item.Subtitulo, item.Inicio, item.Fim)));
+                Dica(item.Tipo, item.Titulo, item.Subtitulo, item.Inicio, item.Fim),
+                item.Alvo));
         }
 
         return blocos;
@@ -279,24 +286,54 @@ public static class CalendarioDeEsforco
     }
 
     private static bool TentarDescrever(
-        IntervaloDeEsforco intervalo,
+        TrechoDeEsforco trecho,
         ModoDoCalendario modo,
         NomesDePainel nomes,
         IReadOnlyList<OcultacaoDeEscritorio> ocultos,
+        IReadOnlyDictionary<long, string>? enderecos,
         out Descricao descricao)
     {
+        var intervalo = trecho.Intervalo;
+        var origem = new Origem(
+            intervalo.Programa,
+            intervalo.Titulo,
+            ValidadeDeVinculo.Endereco(intervalo, enderecos),
+            ResolvedorDeEscritorio.Descoberto(intervalo, nomes));
+        var tipo = Classificar(intervalo);
+        if (trecho.Vinculo is not null && tipo.Length == 0)
+            tipo = TipoVinculo;
+
         if (modo == ModoDoCalendario.Programas)
         {
             var tela = Tela(intervalo, nomes);
-            descricao = new Descricao(intervalo.Programa, tela, "programa:" + intervalo.Programa, Classificar(intervalo));
+            descricao = new Descricao(intervalo.Programa, tela, "programa:" + intervalo.Programa, tipo, origem);
             return intervalo.Programa.Length > 0;
         }
 
         if (modo == ModoDoCalendario.Telas)
         {
             var tela = Tela(intervalo, nomes);
-            descricao = new Descricao(tela, intervalo.Programa, "tela:" + NomesDePainel.Normalizar(tela), Classificar(intervalo));
+            descricao = new Descricao(tela, intervalo.Programa, "tela:" + NomesDePainel.Normalizar(tela), tipo, origem);
             return tela.Length > 0;
+        }
+
+        if (trecho.Vinculo is VinculoAplicado vinculo)
+        {
+            var rotulo = nomes.RotuloDeEscritorio(vinculo.Escritorio);
+            if (nomes.Oculto(vinculo.Escritorio, rotulo, ocultos))
+            {
+                descricao = default;
+                return false;
+            }
+
+            var feito = Feito(intervalo, nomes);
+            descricao = new Descricao(
+                rotulo,
+                vinculo.Categoria.Length == 0 ? feito : $"{vinculo.Categoria} · {feito}",
+                "id:" + vinculo.Escritorio,
+                TipoVinculo,
+                origem);
+            return true;
         }
 
         if (!TentarEscritorio(intervalo, nomes, out var id, out var titulo))
@@ -314,7 +351,7 @@ public static class CalendarioDeEsforco
         var chave = string.IsNullOrEmpty(id)
             ? "nome:" + NomesDePainel.Normalizar(titulo)
             : "id:" + id;
-        descricao = new Descricao(titulo, Feito(intervalo, nomes), chave, Classificar(intervalo));
+        descricao = new Descricao(titulo, Feito(intervalo, nomes), chave, tipo, origem);
         return true;
     }
 
@@ -433,7 +470,18 @@ public static class CalendarioDeEsforco
             if (fimSeg < inicioSeg)
                 continue;
 
-            yield return new Fatia(dia, inicio, fim, inicioSeg, fimSeg, descricao);
+            var comecoReal = intervalo.Inicio;
+            var meiaNoite = new DateTimeOffset(dia);
+            if (comecoReal < meiaNoite)
+                comecoReal = meiaNoite;
+            var fimReal = intervalo.Fim ?? agora;
+            var virada = new DateTimeOffset(proximo);
+            if (fimReal > virada)
+                fimReal = virada;
+            if (fimReal < comecoReal)
+                fimReal = comecoReal;
+
+            yield return new Fatia(dia, inicio, fim, inicioSeg, fimSeg, descricao, comecoReal, fimReal);
         }
     }
 
@@ -549,7 +597,61 @@ public static class CalendarioDeEsforco
         return $"{minuto / 60:00}:{minuto % 60:00}";
     }
 
-    private readonly record struct Descricao(string Titulo, string Subtitulo, string Chave, string Tipo);
+    public const string TipoVinculo = "Vínculo";
 
-    private readonly record struct Fatia(DateTime Dia, int Inicio, int Fim, int InicioSeg, int FimSeg, Descricao Descricao);
+    private readonly record struct Origem(string Programa, string Titulo, string Endereco, bool Descoberto);
+
+    private readonly record struct Descricao(string Titulo, string Subtitulo, string Chave, string Tipo, Origem Origem);
+
+    private readonly record struct Fatia(
+        DateTime Dia,
+        int Inicio,
+        int Fim,
+        int InicioSeg,
+        int FimSeg,
+        Descricao Descricao,
+        DateTimeOffset InicioReal,
+        DateTimeOffset FimReal);
+
+    /// <summary>
+    /// Junta as fatias de uma faixa fundida: o período inteiro e a janela que mais durou,
+    /// de preferência uma sem escritório descoberto, que é onde o vínculo manual tem efeito.
+    /// </summary>
+    private sealed class AlvoEmFaixa
+    {
+        private DateTimeOffset _inicio;
+        private DateTimeOffset _fim;
+        private Origem _origem;
+        private TimeSpan _peso;
+
+        public AlvoEmFaixa(Fatia fatia)
+        {
+            _inicio = fatia.InicioReal;
+            _fim = fatia.FimReal;
+            _origem = fatia.Descricao.Origem;
+            _peso = fatia.FimReal - fatia.InicioReal;
+        }
+
+        public void Juntar(Fatia fatia)
+        {
+            if (fatia.InicioReal < _inicio)
+                _inicio = fatia.InicioReal;
+            if (fatia.FimReal > _fim)
+                _fim = fatia.FimReal;
+
+            var origem = fatia.Descricao.Origem;
+            var peso = fatia.FimReal - fatia.InicioReal;
+            var melhor = origem.Descoberto != _origem.Descoberto
+                ? !origem.Descoberto
+                : peso > _peso;
+            if (!melhor)
+                return;
+
+            _origem = origem;
+            _peso = peso;
+        }
+
+        public AlvoDeVinculo Concluir() =>
+            new(_origem.Programa, _origem.Titulo, _origem.Endereco, _inicio, _fim, _origem.Descoberto);
+    }
 }

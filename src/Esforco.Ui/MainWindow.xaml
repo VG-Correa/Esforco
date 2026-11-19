@@ -115,6 +115,7 @@
             <Setter Property="local:TrilhaDeHorario.Trilha" Value="{Binding Trilha}"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <DataTemplate x:Key="ConteudoDoBalao">
             <StackPanel MaxWidth="280">
@@ -131,6 +132,11 @@
                 <TextBlock Text="{Binding Titulo}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                 <TextBlock Text="{Binding Subtitulo}" TextWrapping="Wrap" Margin="0,2,0,0"/>
                 <TextBlock Text="{Binding Horario}" Foreground="#7A756C" Margin="0,2,0,0"/>
+                <TextBlock Text="Clique para vincular a um escritório"
+                           Foreground="#7A756C"
+                           FontSize="11"
+                           Margin="0,4,0,0"
+                           Visibility="{Binding Clicavel, Converter={StaticResource BoleanoParaVisibilidade}}"/>
             </StackPanel>
         </DataTemplate>
         <DataTemplate x:Key="BlocoDoCalendario">
@@ -401,6 +407,26 @@
                 <Button DockPanel.Dock="Right"
                         Style="{StaticResource BotaoSecundario}"
                         Padding="12,6"
+                        Margin="8,0,0,0"
+                        Click="AbrirMenu"
+                        ToolTip="{Binding TextoDoAtalho}">
+                    <Button.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <MenuItem Header="Vínculos salvos…" Command="{Binding AbrirVinculos}"/>
+                            <MenuItem Header="Categorias…" Command="{Binding AbrirCategorias}"/>
+                            <Separator/>
+                            <MenuItem Header="{Binding RotuloDoAtalho}" Command="{Binding AbrirAtalho}"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE71B;" Style="{StaticResource Icone}" Margin="0,0,7,0"/>
+                        <TextBlock Text="Vínculos"/>
+                        <TextBlock Text="&#xE70D;" Style="{StaticResource Icone}" FontSize="10" Margin="8,1,0,0"/>
+                    </StackPanel>
+                </Button>
+                <Button DockPanel.Dock="Right"
+                        Style="{StaticResource BotaoSecundario}"
+                        Padding="12,6"
                         Click="AbrirMenu"
                         ToolTip="Filtro de datas">
                     <Button.ContextMenu>
@@ -475,6 +501,11 @@
                             Language="pt-BR"
                             VerticalAlignment="Center"/>
             </DockPanel>
+            <TextBlock Text="{Binding TextoDoAtalho}"
+                       Foreground="#8A3B32"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0"
+                       Visibility="{Binding AtalhoRecusado, Converter={StaticResource BoleanoParaVisibilidade}}"/>
         </StackPanel>
 
         <TextBlock DockPanel.Dock="Bottom"
@@ -795,9 +826,9 @@
                         <TextBlock Margin="0,2,12,0"
                                    Foreground="#7A756C"
                                    TextWrapping="Wrap">
-                            <Run Text="Painel, Chatwoot e reuniões ficam em colunas separadas. "/>
+                            <Run Text="Painel, Chatwoot, reuniões e outros trabalhos ficam em colunas separadas. Outros trabalhos é o tempo que você ligou ao escritório por um vínculo manual. "/>
                             <Run Text="Em azul" Foreground="#2F5D7C"/>
-                            <Run Text=" é o painel ou o Chatwoot usado durante a reunião do mesmo escritório e não entra no total. A parte é a fatia desse total: painel contado, Chatwoot contado e reuniões."/>
+                            <Run Text=" é o painel, o Chatwoot ou o trabalho vinculado feito durante a reunião do mesmo escritório e não entra no total. A parte é a fatia desse total: painel contado, Chatwoot contado, reuniões e outros trabalhos contados."/>
                         </TextBlock>
                     </StackPanel>
                 </DockPanel>
@@ -816,6 +847,7 @@
                                 <ColumnDefinition Width="96"/>
                                 <ColumnDefinition Width="96"/>
                                 <ColumnDefinition Width="96"/>
+                                <ColumnDefinition Width="112"/>
                                 <ColumnDefinition Width="96"/>
                                 <ColumnDefinition Width="56"/>
                                 <ColumnDefinition Width="34"/>
@@ -824,8 +856,9 @@
                             <TextBlock Grid.Column="1" Text="Painel" Style="{StaticResource Legenda}"/>
                             <TextBlock Grid.Column="2" Text="Chatwoot" Style="{StaticResource Legenda}"/>
                             <TextBlock Grid.Column="3" Text="Reuniões" Style="{StaticResource Legenda}"/>
-                            <TextBlock Grid.Column="4" Text="Total" Style="{StaticResource Legenda}" ToolTip="Painel contado, Chatwoot contado e reuniões. O azul não entra."/>
-                            <TextBlock Grid.Column="5" Text="Parte" Style="{StaticResource Legenda}" ToolTip="Fatia desse total."/>
+                            <TextBlock Grid.Column="4" Text="Outros trabalhos" Style="{StaticResource Legenda}" ToolTip="Tempo ligado a este escritório por vínculo manual, fora da reunião dele."/>
+                            <TextBlock Grid.Column="5" Text="Total" Style="{StaticResource Legenda}" ToolTip="Painel contado, Chatwoot contado, reuniões e outros trabalhos. O azul não entra."/>
+                            <TextBlock Grid.Column="6" Text="Parte" Style="{StaticResource Legenda}" ToolTip="Fatia desse total."/>
                         </Grid>
                         <ItemsControl ItemsSource="{Binding Escritorios}">
                             <ItemsControl.ItemTemplate>
@@ -845,6 +878,7 @@
                                                             <ColumnDefinition Width="96"/>
                                                             <ColumnDefinition Width="96"/>
                                                             <ColumnDefinition Width="96"/>
+                                                            <ColumnDefinition Width="112"/>
                                                             <ColumnDefinition Width="96"/>
                                                             <ColumnDefinition Width="56"/>
                                                         </Grid.ColumnDefinitions>
@@ -891,12 +925,21 @@
                                                         <TextBlock Grid.Column="3"
                                                                    Text="{Binding DuracaoReunioes}"
                                                                    VerticalAlignment="Center"/>
-                                                        <TextBlock Grid.Column="4"
+                                                        <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding DuracaoOutros}"
+                                                                       ToolTip="Tempo ligado a este escritório por vínculo manual, fora da reunião dele."/>
+                                                            <TextBlock Text="{Binding DuracaoOutrosNaReuniao}"
+                                                                       Foreground="#2F5D7C"
+                                                                       FontSize="12"
+                                                                       ToolTip="Trabalho vinculado durante a reunião. Aparece aqui e não entra no total."
+                                                                       Visibility="{Binding TemOutrosNaReuniao, Converter={StaticResource BoleanoParaVisibilidade}}"/>
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="5"
                                                                    Text="{Binding DuracaoTotal}"
                                                                    FontWeight="SemiBold"
                                                                    VerticalAlignment="Center"
-                                                                   ToolTip="Painel contado, Chatwoot contado e reuniões. O azul não entra."/>
-                                                        <TextBlock Grid.Column="5"
+                                                                   ToolTip="Painel contado, Chatwoot contado, reuniões e outros trabalhos. O azul não entra."/>
+                                                        <TextBlock Grid.Column="6"
                                                                    Text="{Binding Parte}"
                                                                    FontWeight="SemiBold"
                                                                    VerticalAlignment="Center"
@@ -1163,6 +1206,36 @@
                                                         </ItemsControl>
                                                     </StackPanel>
                                                 </Border>
+                                                <Border Style="{StaticResource Secao}"
+                                                        Margin="0,8,0,0"
+                                                        Visibility="{Binding MostrarOutros, Converter={StaticResource BoleanoParaVisibilidade}}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="Outros trabalhos"
+                                                                   Style="{StaticResource Legenda}"
+                                                                   Margin="0,0,0,3"/>
+                                                        <ItemsControl ItemsSource="{Binding Outros}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <DockPanel Margin="0,2,0,2">
+                                                                        <TextBlock DockPanel.Dock="Right"
+                                                                                   Text="{Binding Duracao}"
+                                                                                   Margin="12,0,0,0"
+                                                                                   ToolTip="Fora da reunião do escritório. Entra no total."/>
+                                                                        <TextBlock DockPanel.Dock="Right"
+                                                                                   Text="{Binding DuracaoNaReuniao}"
+                                                                                   Foreground="#2F5D7C"
+                                                                                   Margin="12,0,0,0"
+                                                                                   ToolTip="Durante a reunião do escritório. Não entra no total."
+                                                                                   Visibility="{Binding TemNaReuniao, Converter={StaticResource BoleanoParaVisibilidade}}"/>
+                                                                        <TextBlock Text="{Binding Categoria}"
+                                                                                   FontWeight="SemiBold"
+                                                                                   TextTrimming="CharacterEllipsis"/>
+                                                                    </DockPanel>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Border>
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
@@ -1178,6 +1251,7 @@
                                     <ColumnDefinition Width="96"/>
                                     <ColumnDefinition Width="96"/>
                                     <ColumnDefinition Width="96"/>
+                                    <ColumnDefinition Width="112"/>
                                     <ColumnDefinition Width="96"/>
                                     <ColumnDefinition Width="56"/>
                                     <ColumnDefinition Width="34"/>
@@ -1208,11 +1282,21 @@
                                            Text="{Binding TotalDeReunioes}"
                                            FontWeight="SemiBold"
                                            VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="4"
+                                <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TotalOutros}"
+                                               FontWeight="SemiBold"
+                                               ToolTip="Tempo ligado a escritórios por vínculo manual, fora da reunião."/>
+                                    <TextBlock Text="{Binding TotalOutrosNaReuniao}"
+                                               Foreground="#2F5D7C"
+                                               FontSize="12"
+                                               ToolTip="Trabalho vinculado durante a reunião. Não entra neste total."
+                                               Visibility="{Binding TemOutrosNaReuniao, Converter={StaticResource BoleanoParaVisibilidade}}"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="5"
                                            Text="{Binding TotalGeral}"
                                            FontWeight="SemiBold"
                                            VerticalAlignment="Center"
-                                           ToolTip="Painel contado, Chatwoot contado e reuniões. O azul não entra."/>
+                                           ToolTip="Painel contado, Chatwoot contado, reuniões e outros trabalhos. O azul não entra."/>
                             </Grid>
                         </Border>
                     </StackPanel>

@@ -8,6 +8,12 @@ public sealed record TemaDeReuniao(string Tema, TimeSpan Duracao, IReadOnlyList<
 
 public sealed record PlanoConhecido(string Plano, string Nome);
 
+/// <summary>
+/// Tempo de vínculo manual em uma categoria. DuracaoNaReuniao é o trecho que a reunião
+/// do mesmo escritório já conta: aparece em azul e não entra no total.
+/// </summary>
+public sealed record OutroTrabalho(string Categoria, TimeSpan Duracao, TimeSpan DuracaoNaReuniao);
+
 public sealed record LinhaDeEscritorio(
     string Chave,
     string Id,
@@ -22,7 +28,16 @@ public sealed record LinhaDeEscritorio(
     IReadOnlyList<PlanoConhecido> Planos,
     bool Editavel,
     TimeSpan DuracaoChat = default,
-    TimeSpan DuracaoChatNaReuniao = default);
+    TimeSpan DuracaoChatNaReuniao = default,
+    TimeSpan DuracaoOutros = default,
+    TimeSpan DuracaoOutrosNaReuniao = default,
+    IReadOnlyList<OutroTrabalho>? Outros = null)
+{
+    /// <summary>
+    /// O que entra no Total e na Parte: painel, Chatwoot, reuniões e outros trabalhos, sem o azul.
+    /// </summary>
+    public TimeSpan DuracaoContada => DuracaoPainel + DuracaoChat + DuracaoReunioes + DuracaoOutros;
+}
 
 public static class RelatorioDeEscritorios
 {
@@ -30,14 +45,19 @@ public static class RelatorioDeEscritorios
         IEnumerable<IntervaloDeEsforco> intervalos,
         DateTimeOffset agora,
         IEnumerable<CadastroDeEscritorio>? cadastros = null,
-        IEnumerable<IntervaloDeEsforco>? historico = null)
+        IEnumerable<IntervaloDeEsforco>? historico = null,
+        ContextoDeVinculos? vinculos = null)
     {
         ArgumentNullException.ThrowIfNull(intervalos);
-        var periodo = intervalos.ToList();
-        var todos = historico?.ToList() ?? periodo;
+        var gravados = intervalos.ToList();
+        var todos = historico?.ToList() ?? gravados;
         var lista = cadastros?.ToList() ?? [];
         var nomes = new NomesDePainel(lista);
         var porId = lista.Where(item => item.Id.Length > 0).ToDictionary(item => item.Id, StringComparer.Ordinal);
+
+        var trechos = AplicadorDeVinculos.Aplicar(gravados, vinculos, nomes, agora, todos);
+        var periodo = trechos.Where(trecho => trecho.Vinculo is null).Select(trecho => trecho.Intervalo).ToList();
+        var vinculados = trechos.Where(trecho => trecho.Vinculo is not null).ToList();
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var cadastro in lista)
@@ -51,6 +71,9 @@ public static class RelatorioDeEscritorios
             if (intervalo.EhPainelSplitC && intervalo.Escritorio.Trim().Length > 0)
                 ids.Add(intervalo.Escritorio.Trim());
         }
+
+        foreach (var trecho in vinculados)
+            ids.Add(trecho.Vinculo!.Escritorio);
 
         var linhas = ids
             .Select(id => LinhaDoPainel(id, porId, periodo, todos, nomes, agora))
@@ -105,19 +128,31 @@ public static class RelatorioDeEscritorios
                 };
             }
 
-            var chats = periodo.Where(intervalo => EhChat(intervalo, id)).ToList();
-            if (chats.Count == 0)
-                continue;
-
             IReadOnlyList<IntervaloDeEsforco> reunioesDoEscritorio = grupo is null
                 ? []
                 : grupo.Select(item => item.Intervalo).ToList();
-            var (chatContado, chatNaReuniao) = PainelDuranteReuniao.Separar(chats, reunioesDoEscritorio, agora);
-            linhas[i] = linhas[i] with
+
+            var chats = periodo.Where(intervalo => EhChat(intervalo, id)).ToList();
+            if (chats.Count > 0)
             {
-                DuracaoChat = chatContado,
-                DuracaoChatNaReuniao = chatNaReuniao,
-            };
+                var (chatContado, chatNaReuniao) = PainelDuranteReuniao.Separar(chats, reunioesDoEscritorio, agora);
+                linhas[i] = linhas[i] with
+                {
+                    DuracaoChat = chatContado,
+                    DuracaoChatNaReuniao = chatNaReuniao,
+                };
+            }
+
+            var outros = OutrosDe(vinculados.Where(trecho => trecho.Vinculo!.Escritorio == id), reunioesDoEscritorio, agora);
+            if (outros.Count > 0)
+            {
+                linhas[i] = linhas[i] with
+                {
+                    DuracaoOutros = Somar(outros.Select(item => item.Duracao)),
+                    DuracaoOutrosNaReuniao = Somar(outros.Select(item => item.DuracaoNaReuniao)),
+                    Outros = outros,
+                };
+            }
         }
 
         foreach (var grupo in semDono.Values)
@@ -140,10 +175,39 @@ public static class RelatorioDeEscritorios
         }
 
         return linhas
-            .OrderByDescending(linha => linha.DuracaoPainel + linha.DuracaoReunioes + linha.DuracaoChat > TimeSpan.Zero)
-            .ThenByDescending(linha => linha.DuracaoPainel + linha.DuracaoReunioes + linha.DuracaoChat)
+            .OrderByDescending(linha => linha.DuracaoContada > TimeSpan.Zero)
+            .ThenByDescending(linha => linha.DuracaoContada)
             .ThenBy(linha => linha.Rotulo, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static List<OutroTrabalho> OutrosDe(
+        IEnumerable<TrechoDeEsforco> vinculados,
+        IReadOnlyList<IntervaloDeEsforco> reunioes,
+        DateTimeOffset agora)
+    {
+        return vinculados
+            .GroupBy(trecho => trecho.Vinculo!.Categoria, StringComparer.OrdinalIgnoreCase)
+            .Select(grupo =>
+            {
+                var (contado, naReuniao) = PainelDuranteReuniao.Separar(
+                    grupo.Select(trecho => trecho.Intervalo),
+                    reunioes,
+                    agora);
+                var nome = grupo.Key.Length == 0 ? CadastroDeCategorias.SemCategoria : grupo.First().Vinculo!.Categoria;
+                return new OutroTrabalho(nome, contado, naReuniao);
+            })
+            .OrderByDescending(item => item.Duracao + item.DuracaoNaReuniao)
+            .ThenBy(item => item.Categoria, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static TimeSpan Somar(IEnumerable<TimeSpan> duracoes)
+    {
+        var total = TimeSpan.Zero;
+        foreach (var duracao in duracoes)
+            total += duracao;
+        return total;
     }
 
     private static LinhaDeEscritorio LinhaDoPainel(

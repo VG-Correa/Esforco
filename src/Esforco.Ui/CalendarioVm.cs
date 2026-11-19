@@ -8,7 +8,12 @@ public sealed class DiaCalendarioVm : Observavel
 {
     private string _duracao;
 
-    public DiaCalendarioVm(DiaDeCalendario dia, int horaInicial, int horaFinal, Action<DateTime> abrir)
+    public DiaCalendarioVm(
+        DiaDeCalendario dia,
+        int horaInicial,
+        int horaFinal,
+        Action<DateTime> abrir,
+        Action<AlvoDeVinculo>? vincular = null)
     {
         Rotulo = dia.Rotulo;
         Numero = dia.Numero.ToString();
@@ -19,7 +24,7 @@ public sealed class DiaCalendarioVm : Observavel
         HoraInicial = horaInicial;
         HoraFinal = horaFinal;
         TemFaixa = dia.Blocos.Count > 0;
-        Blocos = dia.Blocos.Select(bloco => new BlocoCalendarioVm(bloco)).ToList();
+        Blocos = dia.Blocos.Select(bloco => new BlocoCalendarioVm(bloco, vincular)).ToList();
         Linhas = dia.Linhas.Select(linha => new LinhaCalendarioVm(linha)).ToList();
         Abrir = new Comando(() => abrir(dia.Dia), () => dia.NoPeriodo);
     }
@@ -63,9 +68,13 @@ public sealed class BlocoCalendarioVm : Observavel
     private int _fim;
     private int _fimSegundo;
     private string _dica;
+    private AlvoDeVinculo? _alvo;
+    private readonly Action<AlvoDeVinculo>? _vincular;
 
-    public BlocoCalendarioVm(BlocoDeCalendario bloco)
+    public BlocoCalendarioVm(BlocoDeCalendario bloco, Action<AlvoDeVinculo>? vincular = null)
     {
+        _alvo = bloco.Alvo;
+        _vincular = vincular;
         Titulo = bloco.Titulo;
         Subtitulo = bloco.Subtitulo;
         Tipo = bloco.Tipo;
@@ -103,8 +112,20 @@ public sealed class BlocoCalendarioVm : Observavel
         "Painel" => "\uE9D9",
         "Chatwoot" => "\uE8F2",
         "Reunião" => "\uE714",
+        CalendarioDeEsforco.TipoVinculo => "\uE71B",
         _ => "",
     };
+
+    public bool Clicavel => _alvo is not null && _vincular is not null;
+
+    /// <summary>
+    /// Clique na faixa: abre a janelinha de vínculo para o período inteiro dela.
+    /// </summary>
+    public void Clicar()
+    {
+        if (_alvo is not null)
+            _vincular?.Invoke(_alvo);
+    }
 
     public string Dica => _dica;
 
@@ -133,6 +154,7 @@ public sealed class BlocoCalendarioVm : Observavel
 
     public void Atualizar(BlocoDeCalendario bloco)
     {
+        _alvo = bloco.Alvo;
         if (_fim != bloco.FimMinuto || _fimSegundo != bloco.FimSegundo)
         {
             _fim = bloco.FimMinuto;

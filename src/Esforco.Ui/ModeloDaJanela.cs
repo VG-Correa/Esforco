@@ -13,6 +13,10 @@ namespace Esforco.Ui;
 public sealed class ModeloDaJanela : INotifyPropertyChanged
 {
     private readonly ServicoDeEsforco _servico;
+    private readonly ServicoDeVinculos _vinculos;
+    private readonly AtalhoDaJanela _atalho;
+    private JanelaDeVinculo? _janelinha;
+    private bool _abrindoVinculo;
     private readonly Dictionary<long, LinhaIntervaloVm> _linhas = new();
     private readonly Dictionary<string, NoVm> _nos = new();
     private readonly Dictionary<string, bool> _expansao = new();
@@ -43,10 +47,18 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
     private string _totalChatNaReuniao = "";
     private string _totalDeReunioes = "00:00:00";
     private string _totalGeral = "00:00:00";
+    private string _totalOutros = "00:00:00";
+    private string _totalOutrosNaReuniao = "";
 
-    public ModeloDaJanela(ServicoDeEsforco servico)
+    public ModeloDaJanela(ServicoDeEsforco servico, ServicoDeVinculos vinculos, AtalhoDaJanela atalho)
     {
         _servico = servico;
+        _vinculos = vinculos;
+        _atalho = atalho;
+        _atalho.Mudou += NotificarAtalho;
+        AbrirVinculos = new Comando(AoAbrirVinculos, () => true);
+        AbrirCategorias = new Comando(AoAbrirCategorias, () => true);
+        AbrirAtalho = new Comando(AoAbrirAtalho, () => true);
         Iniciar = new Comando(AoIniciar, () => !_servico.EmLeitura);
         Parar = new Comando(AoParar, () => _servico.EmLeitura);
         RecolherTudo = new Comando(() => DefinirTodos(false), () => Nos.Count > 0);
@@ -263,6 +275,68 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
 
     public ICommand AbrirOcultos { get; }
 
+    public ICommand AbrirVinculos { get; }
+
+    public ICommand AbrirCategorias { get; }
+
+    public ICommand AbrirAtalho { get; }
+
+    public string TextoDoAtalho => _atalho.Registrado
+        ? $"{_atalho.Atual} abre a janelinha de vínculo para a janela que estiver na frente. Só funciona com o Esforço aberto."
+        : $"O Windows recusou o atalho {_atalho.Atual}, porque outro programa já usa essa combinação. Troque em Vínculos, Atalho de vínculo.";
+
+    public string RotuloDoAtalho => $"Atalho de vínculo ({_atalho.Atual})…";
+
+    public bool AtalhoRecusado => !_atalho.Registrado;
+
+    public string TotalOutros => _totalOutros;
+
+    public string TotalOutrosNaReuniao => _totalOutrosNaReuniao;
+
+    public bool TemOutrosNaReuniao => _totalOutrosNaReuniao.Length > 0;
+
+    /// <summary>
+    /// Chamado quando o Windows avisa que o atalho foi apertado. Guarda a janela da frente,
+    /// para o tempo seguir contando para ela, e só então mostra a janelinha.
+    /// </summary>
+    public async void AbrirVinculoPeloAtalho()
+    {
+        if (_janelinha is not null)
+        {
+            _janelinha.Activate();
+            return;
+        }
+
+        if (_abrindoVinculo)
+            return;
+
+        _abrindoVinculo = true;
+        try
+        {
+            var alvo = await Task.Run(() => _servico.SegurarJanelaDaFrente(JanelaDeVinculo.TituloDaJanela));
+            var janela = JanelaDeVinculo.DoAtalho(_servico, _vinculos, alvo);
+            janela.Closed += (_, _) =>
+            {
+                _janelinha = null;
+                _servico.SoltarJanelaDaFrente();
+                if (janela.Salvou)
+                    RecarregarTudo();
+            };
+            _janelinha = janela;
+            janela.Show();
+            janela.Activate();
+        }
+        catch (Exception)
+        {
+            _janelinha = null;
+            _servico.SoltarJanelaDaFrente();
+        }
+        finally
+        {
+            _abrindoVinculo = false;
+        }
+    }
+
     public void AtualizarDuranteLeitura()
     {
         if (!_servico.EmLeitura)
@@ -353,10 +427,103 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
 
         DiasDoCalendario.Clear();
         foreach (var dia in quadro.Dias)
-            DiasDoCalendario.Add(new DiaCalendarioVm(dia, quadro.HoraInicial, quadro.HoraFinal, AbrirDia));
+            DiasDoCalendario.Add(new DiaCalendarioVm(dia, quadro.HoraInicial, quadro.HoraFinal, AbrirDia, AbrirVinculoDoBloco));
     }
 
     private void AbrirDia(DateTime dia) => AplicarFiltro(TipoDeFiltroDeDatas.Dia, dia.Date);
+
+    /// <summary>
+    /// Clique numa faixa do calendário. Numa faixa fundida o alvo cobre o período inteiro dela.
+    /// </summary>
+    private async void AbrirVinculoDoBloco(AlvoDeVinculo alvo)
+    {
+        if (_janelinha is not null)
+        {
+            _janelinha.Activate();
+            return;
+        }
+
+        if (_abrindoVinculo)
+            return;
+
+        _abrindoVinculo = true;
+        try
+        {
+            var alcance = _modoCalendario == ModoDoCalendario.Programas ? AlcanceDoVinculo.Programa : (AlcanceDoVinculo?)null;
+            var janela = JanelaDeVinculo.DoCalendario(_servico, _vinculos, alvo, alcance);
+            if (await janela.MostrarSegurando(Application.Current?.MainWindow))
+                RecarregarTudo();
+        }
+        finally
+        {
+            _abrindoVinculo = false;
+        }
+    }
+
+    private void AoAbrirVinculos()
+    {
+        if (_janelinha is not null || _abrindoVinculo)
+            return;
+
+        var dialogo = new JanelaDeVinculos(_servico, _vinculos)
+        {
+            Owner = Application.Current?.MainWindow,
+            WindowStartupLocation = Application.Current?.MainWindow is null
+                ? WindowStartupLocation.CenterScreen
+                : WindowStartupLocation.CenterOwner,
+        };
+        _abrindoVinculo = true;
+        try
+        {
+            dialogo.ShowDialog();
+        }
+        finally
+        {
+            _abrindoVinculo = false;
+        }
+
+        RecarregarTudo();
+    }
+
+    private void AoAbrirCategorias()
+    {
+        var dialogo = new JanelaDeCategorias(_vinculos)
+        {
+            Owner = Application.Current?.MainWindow,
+            WindowStartupLocation = Application.Current?.MainWindow is null
+                ? WindowStartupLocation.CenterScreen
+                : WindowStartupLocation.CenterOwner,
+        };
+        dialogo.ShowDialog();
+        RecarregarTudo();
+    }
+
+    private void AoAbrirAtalho()
+    {
+        var dialogo = new JanelaDeAtalho(_atalho)
+        {
+            Owner = Application.Current?.MainWindow,
+            WindowStartupLocation = Application.Current?.MainWindow is null
+                ? WindowStartupLocation.CenterScreen
+                : WindowStartupLocation.CenterOwner,
+        };
+        dialogo.ShowDialog();
+    }
+
+    private void NotificarAtalho()
+    {
+        Notificar(nameof(TextoDoAtalho));
+        Notificar(nameof(RotuloDoAtalho));
+        Notificar(nameof(AtalhoRecusado));
+    }
+
+    private void RecarregarTudo()
+    {
+        _assinatura = null;
+        _assinaturaCalendario = null;
+        Atualizar();
+        CommandManager.InvalidateRequerySuggested();
+    }
 
     private bool AplicarCalendario(QuadroDeCalendario quadro)
     {
@@ -417,9 +584,9 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
     {
         var texto = _modoCalendario switch
         {
-            ModoDoCalendario.Programas => "Cada coluna é um dia e as horas descem nela. O título é o programa e o subtítulo é a tela.",
-            ModoDoCalendario.Telas => "Cada coluna é um dia e as horas descem nela. O título é a tela e o subtítulo é o programa.",
-            _ => "Cada coluna é um dia e as horas descem nela. O símbolo marca painel, Chatwoot ou reunião. O título é o escritório e o subtítulo é o que foi feito.",
+            ModoDoCalendario.Programas => "Cada coluna é um dia e as horas descem nela. O título é o programa e o subtítulo é a tela. Clique numa faixa para vincular a um escritório.",
+            ModoDoCalendario.Telas => "Cada coluna é um dia e as horas descem nela. O título é a tela e o subtítulo é o programa. Clique numa faixa para vincular a um escritório.",
+            _ => "Cada coluna é um dia e as horas descem nela. O símbolo marca painel, Chatwoot, reunião ou vínculo manual. O título é o escritório e o subtítulo é o que foi feito. Clique numa faixa para vincular a um escritório.",
         };
         if (_legendaDoCalendario == texto)
             return;
@@ -459,7 +626,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             foreach (var bloco in dia.Blocos)
             {
                 texto.Append('|').Append(bloco.InicioMinuto).Append('-').Append(bloco.FimMinuto);
-                texto.Append('#').Append(bloco.Trilha).Append(bloco.Titulo).Append(bloco.Subtitulo);
+                texto.Append('#').Append(bloco.Trilha).Append(bloco.Titulo).Append(bloco.Subtitulo).Append(bloco.Tipo);
             }
         }
 
@@ -474,6 +641,8 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         var totalChat = TimeSpan.Zero;
         var totalChatNaReuniao = TimeSpan.Zero;
         var totalReunioes = TimeSpan.Zero;
+        var totalOutros = TimeSpan.Zero;
+        var totalOutrosNaReuniao = TimeSpan.Zero;
         foreach (var linha in linhas)
         {
             totalPainel += linha.DuracaoPainel;
@@ -481,9 +650,11 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             totalChat += linha.DuracaoChat;
             totalChatNaReuniao += linha.DuracaoChatNaReuniao;
             totalReunioes += linha.DuracaoReunioes;
+            totalOutros += linha.DuracaoOutros;
+            totalOutrosNaReuniao += linha.DuracaoOutrosNaReuniao;
         }
 
-        var totalGeral = totalPainel + totalChat + totalReunioes;
+        var totalGeral = totalPainel + totalChat + totalReunioes + totalOutros;
 
         if (MesmasLinhas(linhas))
         {
@@ -526,6 +697,12 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             nameof(TotalChatNaReuniao));
         Notificar(nameof(TemChatNaReuniao));
         DefinirTotal(ref _totalDeReunioes, Formatar.Duracao(totalReunioes), nameof(TotalDeReunioes));
+        DefinirTotal(ref _totalOutros, Formatar.Duracao(totalOutros), nameof(TotalOutros));
+        DefinirTotal(
+            ref _totalOutrosNaReuniao,
+            totalOutrosNaReuniao > TimeSpan.Zero ? Formatar.Duracao(totalOutrosNaReuniao) : "",
+            nameof(TotalOutrosNaReuniao));
+        Notificar(nameof(TemOutrosNaReuniao));
         DefinirTotal(ref _totalGeral, Formatar.Duracao(totalGeral), nameof(TotalGeral));
         CommandManager.InvalidateRequerySuggested();
     }
@@ -590,8 +767,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         Clipboard.SetText(texto);
     }
 
-    private static TimeSpan Contado(LinhaDeEscritorio linha) =>
-        linha.DuracaoPainel + linha.DuracaoChat + linha.DuracaoReunioes;
+    private static TimeSpan Contado(LinhaDeEscritorio linha) => linha.DuracaoContada;
 
     private static string Parte(TimeSpan duracao, TimeSpan total)
     {
@@ -854,10 +1030,11 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
                 Formatar.Instante(intervalo.Inicio),
                 Formatar.Fim(intervalo.Fim),
                 Formatar.Duracao(intervalo.DuracaoAte(agora)),
-                string.IsNullOrWhiteSpace(intervalo.Escritorio) ? "vazio" : intervalo.Escritorio,
+                EscritorioDe(intervalo),
                 intervalo.Minimizada ? "minimizada" : "ativa",
                 intervalo.DuranteReuniao,
-                intervalo.EhChatwoot);
+                intervalo.EhChatwoot,
+                intervalo.EscritorioVinculado.Length > 0);
             if (intervalo.Id is long id)
                 _linhas[id] = linha;
             vm.Intervalos.Add(linha);
@@ -869,6 +1046,11 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
         vm.AtualizarConteudo();
         return vm;
     }
+
+    private static string EscritorioDe(IntervaloDeEsforco intervalo) =>
+        intervalo.EscritorioVinculado.Length > 0
+            ? $"{intervalo.EscritorioVinculado} (vínculo)"
+            : string.IsNullOrWhiteSpace(intervalo.Escritorio) ? "vazio" : intervalo.Escritorio;
 
     private bool AbertoInicial(string chave, bool raiz)
     {
@@ -994,6 +1176,7 @@ public sealed class ModeloDaJanela : INotifyPropertyChanged
             texto.Append(intervalo.Id);
             texto.Append(':');
             texto.Append(intervalo.Fim?.UtcTicks.ToString() ?? "aberto");
+            texto.Append(':').Append(intervalo.EscritorioVinculado);
             texto.Append('|');
         }
 
@@ -1176,6 +1359,7 @@ public sealed class LinhaIntervaloVm : Observavel
     private string _duracao;
     private bool _duranteReuniao;
     private readonly bool _ehChat;
+    private readonly bool _vinculado;
 
     public LinhaIntervaloVm(
         long id,
@@ -1185,8 +1369,10 @@ public sealed class LinhaIntervaloVm : Observavel
         string escritorio,
         string janela,
         bool duranteReuniao,
-        bool ehChat = false)
+        bool ehChat = false,
+        bool vinculado = false)
     {
+        _vinculado = vinculado;
         Id = id;
         Inicio = inicio;
         _fim = fim;
@@ -1232,8 +1418,12 @@ public sealed class LinhaIntervaloVm : Observavel
     }
 
     public string? Dica => !DuranteReuniao
-        ? null
-        : _ehChat
+        ? _vinculado
+            ? "Este escritório veio de um vínculo manual. O tempo entra em Outros trabalhos no relatório de Escritórios."
+            : null
+        : _vinculado
+            ? "Este trabalho vinculado foi durante a reunião do mesmo escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total."
+            : _ehChat
             ? "Este Chatwoot foi durante a reunião do escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total."
             : "Este uso do painel foi durante a reunião do escritório. O tempo continua nesta lista. No relatório de Escritórios, o trecho simultâneo não entra no total.";
 

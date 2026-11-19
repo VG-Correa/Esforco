@@ -36,10 +36,12 @@ public partial class App : Application
             builder.Services.AddSingleton<IFonteDeRegrasDeEscritorio>(_ =>
                 new FonteDeRegrasDeEscritorioJson(FonteDeRegrasDeEscritorioJson.CaminhoAoLadoDoExecutavel()));
             builder.Services.AddSingleton<IRepositorioDeIntervalos>(_ =>
-                new RepositorioSqliteDeIntervalos(BancoDoEsforco.Resolver(
-                    PastaDoPrograma.Obter(),
-                    Environment.CurrentDirectory,
-                    Environment.GetEnvironmentVariable("ESFORCO_RAIZ"))));
+                new RepositorioSqliteDeIntervalos(CaminhoDoBanco()));
+            builder.Services.AddSingleton<IRepositorioDeVinculos>(_ =>
+                new RepositorioSqliteDeVinculos(CaminhoDoBanco()));
+            builder.Services.AddSingleton<ServicoDeVinculos>();
+            builder.Services.AddSingleton<IAtalhoGlobal, AtalhoGlobalUser32>();
+            builder.Services.AddSingleton<AtalhoDaJanela>();
             builder.Services.AddSingleton<ServicoDeEsforco>();
             builder.Services.AddHostedService<PulsoDeLeitura>();
             builder.Services.AddSingleton<ModeloDaJanela>();
@@ -83,6 +85,12 @@ public partial class App : Application
         await EncerrarHost();
         base.OnExit(e);
     }
+
+    private static string CaminhoDoBanco() =>
+        BancoDoEsforco.Resolver(
+            PastaDoPrograma.Obter(),
+            Environment.CurrentDirectory,
+            Environment.GetEnvironmentVariable("ESFORCO_RAIZ"));
 
     private async Task EncerrarHost()
     {

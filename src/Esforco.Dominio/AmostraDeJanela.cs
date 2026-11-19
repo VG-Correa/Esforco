@@ -5,4 +5,5 @@ public sealed record AmostraDeJanela(
     string Titulo,
     bool Minimizada,
     string Endereco = "",
-    string Conversa = "");
+    string Conversa = "",
+    bool Propria = false);

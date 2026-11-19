@@ -16,6 +16,8 @@ public sealed class EscritorioVm : Observavel
     private string _duracaoChat = "00:00:00";
     private string _duracaoChatNaReuniao = "";
     private string _duracaoReunioes = "00:00:00";
+    private string _duracaoOutros = "00:00:00";
+    private string _duracaoOutrosNaReuniao = "";
     private string _duracaoTotal = "00:00:00";
     private string _parte = "0%";
     private string _nome = "";
@@ -105,6 +107,26 @@ public sealed class EscritorioVm : Observavel
         private set => Definir(ref _duracaoReunioes, value);
     }
 
+    public string DuracaoOutros
+    {
+        get => _duracaoOutros;
+        private set => Definir(ref _duracaoOutros, value);
+    }
+
+    public string DuracaoOutrosNaReuniao
+    {
+        get => _duracaoOutrosNaReuniao;
+        private set
+        {
+            if (!DefinirRetornando(ref _duracaoOutrosNaReuniao, value))
+                return;
+
+            Notificar(nameof(TemOutrosNaReuniao));
+        }
+    }
+
+    public bool TemOutrosNaReuniao => _duracaoOutrosNaReuniao.Length > 0;
+
     public string DuracaoTotal
     {
         get => _duracaoTotal;
@@ -172,6 +194,7 @@ public sealed class EscritorioVm : Observavel
             Notificar(nameof(Seta));
             Notificar(nameof(ConteudoVisivel));
             Notificar(nameof(SemReunioes));
+            Notificar(nameof(MostrarOutros));
             Notificar(nameof(MostrarTextoLivre));
         }
     }
@@ -205,6 +228,8 @@ public sealed class EscritorioVm : Observavel
 
     public bool SemReunioes => _aberto && Temas.Count == 0;
 
+    public bool MostrarOutros => _aberto && Outros.Count > 0;
+
     public bool TemVariacoes => Variacoes.Count > 0;
 
     public bool TemPlanos => Planos.Count > 0;
@@ -216,6 +241,8 @@ public sealed class EscritorioVm : Observavel
     public string TextoLivre => "Este nome ainda não está ligado a um id.";
 
     public ObservableCollection<TemaReuniaoVm> Temas { get; } = new();
+
+    public ObservableCollection<OutroTrabalhoVm> Outros { get; } = new();
 
     public ObservableCollection<VariacaoVm> Variacoes { get; } = new();
 
@@ -250,7 +277,11 @@ public sealed class EscritorioVm : Observavel
             ? Formatar.Duracao(linha.DuracaoChatNaReuniao)
             : "";
         DuracaoReunioes = Formatar.Duracao(linha.DuracaoReunioes);
-        DuracaoTotal = Formatar.Duracao(linha.DuracaoPainel + linha.DuracaoChat + linha.DuracaoReunioes);
+        DuracaoOutros = Formatar.Duracao(linha.DuracaoOutros);
+        DuracaoOutrosNaReuniao = linha.DuracaoOutrosNaReuniao > TimeSpan.Zero
+            ? Formatar.Duracao(linha.DuracaoOutrosNaReuniao)
+            : "";
+        DuracaoTotal = Formatar.Duracao(linha.DuracaoContada);
         Parte = parte;
         _nomeSalvo = linha.Nome;
         if (!_nomeAlterado)
@@ -259,6 +290,8 @@ public sealed class EscritorioVm : Observavel
         SincronizarVariacoes(linha.Variacoes);
         SincronizarPlanos(linha.Planos);
         SincronizarTemas(linha.Temas);
+        SincronizarOutros(linha.Outros ?? []);
+        Notificar(nameof(MostrarOutros));
         Notificar(nameof(Identificacao));
         Notificar(nameof(Etiqueta));
         Notificar(nameof(TemEtiqueta));
@@ -407,6 +440,20 @@ public sealed class EscritorioVm : Observavel
             Temas.Add(TemaReuniaoVm.Criar(tema));
     }
 
+    private void SincronizarOutros(IReadOnlyList<OutroTrabalho> outros)
+    {
+        if (Outros.Select(item => item.Categoria).SequenceEqual(outros.Select(item => item.Categoria)))
+        {
+            for (var i = 0; i < outros.Count; i++)
+                Outros[i].Atualizar(outros[i]);
+            return;
+        }
+
+        Outros.Clear();
+        foreach (var outro in outros)
+            Outros.Add(new OutroTrabalhoVm(outro));
+    }
+
     private static string Assinar(IReadOnlyList<TemaDeReuniao> temas)
     {
         var texto = new StringBuilder();
@@ -506,6 +553,53 @@ public sealed class PlanoVm : Observavel
     public void Restaurar(string nome) => Nome = nome;
 
     public void Confirmar() => Alterado = false;
+}
+
+/// <summary>
+/// Uma categoria de Outros trabalhos dentro do cartão do escritório.
+/// </summary>
+public sealed class OutroTrabalhoVm : Observavel
+{
+    private string _duracao = "";
+    private string _duracaoNaReuniao = "";
+
+    public OutroTrabalhoVm(OutroTrabalho outro)
+    {
+        Categoria = outro.Categoria;
+        Atualizar(outro);
+    }
+
+    public string Categoria { get; }
+
+    public string Duracao
+    {
+        get => _duracao;
+        private set => Definir(ref _duracao, value);
+    }
+
+    public string DuracaoNaReuniao
+    {
+        get => _duracaoNaReuniao;
+        private set
+        {
+            if (_duracaoNaReuniao == value)
+                return;
+
+            _duracaoNaReuniao = value;
+            Notificar(nameof(DuracaoNaReuniao));
+            Notificar(nameof(TemNaReuniao));
+        }
+    }
+
+    public bool TemNaReuniao => _duracaoNaReuniao.Length > 0;
+
+    public void Atualizar(OutroTrabalho outro)
+    {
+        Duracao = Formatar.Duracao(outro.Duracao);
+        DuracaoNaReuniao = outro.DuracaoNaReuniao > TimeSpan.Zero
+            ? Formatar.Duracao(outro.DuracaoNaReuniao)
+            : "";
+    }
 }
 
 public sealed class TemaReuniaoVm : Observavel

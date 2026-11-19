@@ -5,6 +5,41 @@ public static class BancoDoEsforco
     public const string Pasta = "db";
     public const string MarcadorDaRaiz = "Esforco.slnx";
 
+    /// <summary>
+    /// Tabelas do vínculo manual. São só criadas, se faltarem: nenhuma tabela que já existia é alterada
+    /// e nenhum intervalo gravado é mexido. enderecos_intervalo guarda o endereço da aba apenas dos
+    /// intervalos que casam com um vínculo por endereço.
+    /// </summary>
+    public const string TabelasDeVinculos = """
+        CREATE TABLE IF NOT EXISTS categorias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS vinculos_escritorio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            escritorio TEXT NOT NULL,
+            categoria_id INTEGER NULL,
+            alcance INTEGER NOT NULL,
+            programa TEXT NOT NULL,
+            titulo TEXT NOT NULL,
+            endereco TEXT NOT NULL,
+            validade INTEGER NOT NULL,
+            inicio TEXT NOT NULL,
+            duracao_segundos REAL NULL,
+            so_registro INTEGER NOT NULL,
+            criado_em TEXT NOT NULL,
+            encerrado_em TEXT NULL
+        );
+        CREATE TABLE IF NOT EXISTS enderecos_intervalo (
+            intervalo_id INTEGER PRIMARY KEY,
+            endereco TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        );
+        """;
+
     public static string Resolver(string pastaDoExecutavel, string? diretorioAtual = null, string? raizInformada = null)
     {
         var raiz = RaizValida(raizInformada)

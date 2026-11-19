@@ -71,6 +71,11 @@ public sealed class IntervaloDeEsforco
 
     public bool Retomado { get; private set; }
 
+    /// <summary>
+    /// Nome do escritório ligado por vínculo manual. Só vive em memória, para a tela.
+    /// </summary>
+    public string EscritorioVinculado { get; private set; } = "";
+
     public DateTimeOffset Inicio { get; private set; }
 
     public DateTimeOffset? Fim { get; private set; }
@@ -172,6 +177,40 @@ public sealed class IntervaloDeEsforco
     public void MarcarRetomado() => Retomado = true;
 
     public void MarcarDuranteReuniao(bool duranteReuniao) => DuranteReuniao = duranteReuniao;
+
+    public void MarcarVinculo(string? escritorio) => EscritorioVinculado = (escritorio ?? "").Trim();
+
+    /// <summary>
+    /// Cópia limitada a um pedaço deste intervalo. O intervalo gravado não muda.
+    /// </summary>
+    public IntervaloDeEsforco Recortar(DateTimeOffset inicio, DateTimeOffset? fim)
+    {
+        var comeco = inicio < Inicio ? Inicio : inicio;
+        var termino = fim;
+        if (Fim is DateTimeOffset limite && (termino is null || termino.Value > limite))
+            termino = limite;
+        if (termino is DateTimeOffset ate && ate < comeco)
+            termino = comeco;
+
+        var copia = new IntervaloDeEsforco(
+            Id,
+            Programa,
+            Titulo,
+            Contexto,
+            Escritorio,
+            Plano,
+            Periodo,
+            Sessao,
+            Item,
+            TipoDoItem,
+            Minimizada,
+            EmSegundoPlano,
+            comeco,
+            termino,
+            Retomado);
+        copia.DuranteReuniao = DuranteReuniao;
+        return copia;
+    }
 
     public void ContinuarAte(DateTimeOffset? fim)
     {

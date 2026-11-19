@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -9,11 +10,13 @@ public partial class MainWindow : Window
 {
     private readonly ModeloDaJanela _modelo;
     private readonly DispatcherTimer _timer;
+    private readonly AtalhoDaJanela _atalho;
 
-    public MainWindow(ModeloDaJanela modelo)
+    public MainWindow(ModeloDaJanela modelo, AtalhoDaJanela atalho)
     {
         InitializeComponent();
         _modelo = modelo;
+        _atalho = atalho;
         DataContext = modelo;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) =>
@@ -25,7 +28,25 @@ public partial class MainWindow : Window
         _modelo.Atualizar();
         _timer.Start();
         EspacoDaBarra.Width = new GridLength(SystemParameters.VerticalScrollBarWidth);
-        Closed += (_, _) => _timer.Stop();
+        SourceInitialized += (_, _) => RegistrarAtalho();
+        Closed += (_, _) =>
+        {
+            _timer.Stop();
+            _atalho.Desligar();
+        };
+    }
+
+    /// <summary>
+    /// Pede ao Windows para reservar a combinação do atalho de vínculo para esta janela.
+    /// É só o registro de atalho: nenhuma outra tecla passa pelo Esforço.
+    /// </summary>
+    private void RegistrarAtalho()
+    {
+        var janela = new WindowInteropHelper(this).Handle;
+        if (janela == IntPtr.Zero)
+            return;
+
+        _atalho.Ligar(janela, _modelo.AbrirVinculoPeloAtalho);
     }
 
     private bool _gradeRolada;

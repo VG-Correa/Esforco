@@ -1,0 +1,114 @@
+<Window x:Class="Esforco.Ui.JanelaDeVinculos"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Vínculos salvos"
+        Width="720"
+        Height="560"
+        MinWidth="560"
+        MinHeight="360"
+        ShowInTaskbar="False"
+        Background="#F6F4EF"
+        FontFamily="Segoe UI"
+        FontSize="13"
+        Foreground="#1C1B19"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="20">
+        <TextBlock DockPanel.Dock="Top"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,12"
+                   Text="Cada vínculo liga um programa, uma janela ou uma aba a um escritório. Encerrar faz o vínculo parar de valer agora e mantém o que ele já contou. Excluir tira o vínculo e o tempo dele sai de Outros trabalhos."/>
+
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right"
+                    Content="Fechar"
+                    IsCancel="True"
+                    Style="{StaticResource BotaoSecundario}"
+                    Padding="14,6"/>
+            <TextBlock x:Name="Aviso"
+                       DockPanel.Dock="Left"
+                       TextWrapping="Wrap"
+                       Foreground="#8A3B32"
+                       VerticalAlignment="Center"/>
+        </DockPanel>
+
+        <Grid>
+            <TextBlock x:Name="Vazio"
+                       TextWrapping="Wrap"
+                       Foreground="#7A756C"
+                       VerticalAlignment="Top"
+                       Text="Nenhum vínculo ainda. Use o atalho de vínculo com a janela na frente ou clique numa faixa do Calendário."/>
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="Lista" Margin="0,0,8,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource Cartao}"
+                                    Margin="0,0,0,8"
+                                    Opacity="{Binding Opacidade}">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right"
+                                                Orientation="Horizontal"
+                                                VerticalAlignment="Top"
+                                                Margin="12,0,0,0">
+                                        <Button Content="editar"
+                                                Tag="{Binding}"
+                                                Click="Editar"
+                                                Style="{StaticResource BotaoSecundario}"
+                                                Padding="10,3"
+                                                Margin="0,0,6,0"/>
+                                        <Button Content="encerrar agora"
+                                                Tag="{Binding}"
+                                                Click="Encerrar"
+                                                Style="{StaticResource BotaoSecundario}"
+                                                Padding="10,3"
+                                                Margin="0,0,6,0"
+                                                ToolTip="O vínculo para de valer agora. O que ele já contou fica."
+                                                Visibility="{Binding PodeEncerrar, Converter={StaticResource BoleanoParaVisibilidade}}"/>
+                                        <Button Content="excluir"
+                                                Tag="{Binding}"
+                                                Click="Excluir"
+                                                Style="{StaticResource BotaoSecundario}"
+                                                Padding="10,3"
+                                                ToolTip="Tira o vínculo. O tempo dele sai de Outros trabalhos."/>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Escritorio}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <Border Style="{StaticResource Etiqueta}" Margin="8,1,0,0">
+                                                <TextBlock Text="{Binding Categoria}"
+                                                           FontSize="11"
+                                                           Foreground="#6E695F"/>
+                                            </Border>
+                                            <Border Style="{StaticResource Etiqueta}"
+                                                    Margin="6,1,0,0"
+                                                    Visibility="{Binding Inativo, Converter={StaticResource BoleanoParaVisibilidade}}">
+                                                <TextBlock Text="não vale mais"
+                                                           FontSize="11"
+                                                           Foreground="#6E695F"/>
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Programa}"
+                                                   Margin="0,3,0,0"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Alcance}"
+                                                   Foreground="#7A756C"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="36"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Alcance}"/>
+                                        <TextBlock Text="{Binding Validade}"
+                                                   Foreground="#7A756C"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+</Window>

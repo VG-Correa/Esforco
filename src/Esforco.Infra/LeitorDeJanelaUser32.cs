@@ -76,7 +76,13 @@ public sealed class LeitorDeJanelaUser32 : ILeitorDeJanelaDaFrente
         if (conversa.Length > 200)
             conversa = conversa[..200];
 
-        return new AmostraDeJanela(amigavel, titulo, Native.IsIconic(janela), endereco, conversa);
+        return new AmostraDeJanela(
+            amigavel,
+            titulo,
+            Native.IsIconic(janela),
+            endereco,
+            conversa,
+            (int)pid == Environment.ProcessId);
     }
 
     public AmostraDeJanela? LerReuniaoMinimizada()
@@ -188,5 +194,57 @@ public sealed class LeitorDeJanelaUser32 : ILeitorDeJanelaDaFrente
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool IsWindowVisible(IntPtr hWnd);
+    }
+}
+
+/// <summary>
+/// Pede ao Windows que avise a janela do Esforço quando a combinação de teclas for apertada.
+/// É só o registro de atalho do Windows: não há gancho de teclado e nenhuma tecla é lida ou enviada.
+/// </summary>
+[SupportedOSPlatform("windows")]
+public sealed class AtalhoGlobalUser32 : IAtalhoGlobal
+{
+    private const uint Alt = 0x0001;
+    private const uint Ctrl = 0x0002;
+    private const uint Shift = 0x0004;
+    private const uint Win = 0x0008;
+    private const uint SemRepetir = 0x4000;
+
+    public int Mensagem => 0x0312;
+
+    public bool Registrar(IntPtr janela, int id, AtalhoDeTeclado atalho)
+    {
+        ArgumentNullException.ThrowIfNull(atalho);
+        if (janela == IntPtr.Zero)
+            return false;
+
+        var modificadores = SemRepetir;
+        if (atalho.Alt)
+            modificadores |= Alt;
+        if (atalho.Ctrl)
+            modificadores |= Ctrl;
+        if (atalho.Shift)
+            modificadores |= Shift;
+        if (atalho.Win)
+            modificadores |= Win;
+
+        return Native.RegisterHotKey(janela, id, modificadores, (uint)atalho.Codigo);
+    }
+
+    public void Liberar(IntPtr janela, int id)
+    {
+        if (janela != IntPtr.Zero)
+            _ = Native.UnregisterHotKey(janela, id);
+    }
+
+    private static class Native
+    {
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool UnregisterHotKey(IntPtr hWnd, int id);
     }
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace Esforco.Ui;
@@ -36,6 +37,49 @@ public sealed class TrilhaDeHorario : Panel
     }
 
     private MarcaDeAgora? _marca;
+    private BlocoCalendarioVm? _apertado;
+
+    /// <summary>
+    /// O clique numa faixa abre a janelinha de vínculo. O aperto fica marcado como tratado para
+    /// que, na grade do mês, o botão do dia por baixo da faixa não abra o dia.
+    /// </summary>
+    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonDown(e);
+        _apertado = BlocoEm(e.OriginalSource);
+        if (_apertado is not null)
+            e.Handled = true;
+    }
+
+    protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonUp(e);
+        var apertado = _apertado;
+        _apertado = null;
+        if (apertado is null)
+            return;
+
+        e.Handled = true;
+        if (ReferenceEquals(BlocoEm(e.OriginalSource), apertado))
+            apertado.Clicar();
+    }
+
+    protected override void OnMouseLeave(MouseEventArgs e)
+    {
+        base.OnMouseLeave(e);
+        _apertado = null;
+    }
+
+    private static BlocoCalendarioVm? BlocoEm(object origem)
+    {
+        var bloco = origem switch
+        {
+            FrameworkElement elemento => elemento.DataContext as BlocoCalendarioVm,
+            FrameworkContentElement conteudo => conteudo.DataContext as BlocoCalendarioVm,
+            _ => null,
+        };
+        return bloco is { Clicavel: true } ? bloco : null;
+    }
 
     public void InvalidarAgora()
     {
