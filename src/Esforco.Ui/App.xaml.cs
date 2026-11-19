@@ -36,7 +36,10 @@ public partial class App : Application
             builder.Services.AddSingleton<IFonteDeRegrasDeEscritorio>(_ =>
                 new FonteDeRegrasDeEscritorioJson(FonteDeRegrasDeEscritorioJson.CaminhoAoLadoDoExecutavel()));
             builder.Services.AddSingleton<IRepositorioDeIntervalos>(_ =>
-                new RepositorioSqliteDeIntervalos(RepositorioSqliteDeIntervalos.CaminhoAoLadoDoExecutavel()));
+                new RepositorioSqliteDeIntervalos(BancoDoEsforco.Resolver(
+                    PastaDoPrograma.Obter(),
+                    Environment.CurrentDirectory,
+                    Environment.GetEnvironmentVariable("ESFORCO_RAIZ"))));
             builder.Services.AddSingleton<ServicoDeEsforco>();
             builder.Services.AddHostedService<PulsoDeLeitura>();
             builder.Services.AddSingleton<ModeloDaJanela>();

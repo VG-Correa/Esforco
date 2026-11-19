@@ -2,6 +2,9 @@ bin/
 obj/
 saida/
 
+db/*
+!db/.gitkeep
+
 *.db
 *.db-shm
 *.db-wal
