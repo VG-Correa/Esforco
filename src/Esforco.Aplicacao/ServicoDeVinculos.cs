@@ -46,7 +46,7 @@ public sealed class ServicoDeVinculos
 
     /// <summary>
     /// Como a janelinha abre para a janela da frente ou para a faixa do calendário:
-    /// com o vínculo que o alvo já tem, ou em branco.
+    /// com o vínculo que o alvo já tem, com o escritório que o Esforço identificou sozinho, ou em branco.
     /// </summary>
     public FormularioDeVinculo Formulario(AlvoDeVinculo alvo, AlcanceDoVinculo? sugerido = null) =>
         FormularioDeVinculo.Montar(alvo, Contexto().Vinculos, _relogio.Agora(), sugerido);
@@ -55,7 +55,7 @@ public sealed class ServicoDeVinculos
     /// A janelinha em branco para o mesmo alvo, quando a pessoa quer outro vínculo em vez de alterar o que existe.
     /// </summary>
     public FormularioDeVinculo FormularioNovo(AlvoDeVinculo alvo, AlcanceDoVinculo? sugerido = null) =>
-        FormularioDeVinculo.Novo(alvo, _relogio.Agora(), sugerido);
+        FormularioDeVinculo.Novo(alvo with { Identificado = null }, _relogio.Agora(), sugerido);
 
     public ResultadoDeCategoria CriarCategoria(string? nome)
     {

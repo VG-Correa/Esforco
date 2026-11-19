@@ -105,12 +105,6 @@
                                Foreground="#7A756C"/>
                 </StackPanel>
             </Border>
-            <TextBlock x:Name="AvisoDescoberto"
-                       Visibility="Collapsed"
-                       TextWrapping="Wrap"
-                       Foreground="#2F5D7C"
-                       Margin="0,8,0,0"
-                       Text="O Esforço já descobriu sozinho o escritório deste registro (painel, Chatwoot ou reunião) e isso continua valendo. O vínculo só entra onde não houver escritório descoberto."/>
             <DockPanel x:Name="PainelDaSituacao"
                        Visibility="Collapsed"
                        Margin="0,8,0,0">
@@ -170,6 +164,12 @@
             </StackPanel>
 
             <TextBlock Text="Escritório" Style="{StaticResource Rotulo}"/>
+            <!-- De onde veio o escritório que já abre marcado, quando não veio de um vínculo salvo. -->
+            <TextBlock x:Name="OrigemDoEscritorio"
+                       Visibility="Collapsed"
+                       TextWrapping="Wrap"
+                       Foreground="#2F5D7C"
+                       Margin="0,0,0,6"/>
             <TextBox x:Name="Busca"
                      Style="{StaticResource Campo}"
                      TextChanged="AoBuscar"
@@ -189,18 +189,26 @@
                        Foreground="#7A756C"
                        TextWrapping="Wrap"
                        Margin="0,4,0,0"/>
+            <!-- O que Salvar faz com o escritório identificado. Fica abaixo da lista para ela não sair do lugar ao clicar. -->
+            <TextBlock x:Name="AoSalvarIdentificado"
+                       Visibility="Collapsed"
+                       TextWrapping="Wrap"
+                       FontSize="12"
+                       Foreground="#2F5D7C"
+                       Margin="0,6,0,0"/>
 
             <TextBlock Text="Categoria (opcional)" Style="{StaticResource Rotulo}"/>
             <ComboBox x:Name="CampoCategoria"
                       IsEditable="True"
                       IsTextSearchEnabled="True"
                       Padding="6,4"
+                      TextBoxBase.TextChanged="AoMudarCategoria"
                       ToolTip="Escolha uma categoria da sua lista ou escreva uma nova"/>
 
             <TextBlock Text="Alcance do escritório" Style="{StaticResource Rotulo}"/>
-            <RadioButton x:Name="AlcancePrograma" GroupName="Alcance" Content="O programa inteiro"/>
-            <RadioButton x:Name="AlcanceJanela" GroupName="Alcance" Content="Esta janela ou arquivo, pelo título"/>
-            <RadioButton x:Name="AlcanceAba" GroupName="Alcance" Content="Esta aba, pelo título ou pelo endereço" Margin="0"/>
+            <RadioButton x:Name="AlcancePrograma" GroupName="Alcance" Checked="AoMudarOpcao" Content="O programa inteiro"/>
+            <RadioButton x:Name="AlcanceJanela" GroupName="Alcance" Checked="AoMudarOpcao" Content="Esta janela ou arquivo, pelo título"/>
+            <RadioButton x:Name="AlcanceAba" GroupName="Alcance" Checked="AoMudarOpcao" Content="Esta aba, pelo título ou pelo endereço" Margin="0"/>
 
             <StackPanel x:Name="PainelDoRegistro" Visibility="Collapsed">
                 <TextBlock Text="Vale para" Style="{StaticResource Rotulo}"/>

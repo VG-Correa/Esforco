@@ -22,6 +22,17 @@ public static class TextoDeVinculo
         };
     }
 
+    /// <summary>
+    /// Por onde o Esforço identificou o escritório, para completar uma frase como "identificado ...".
+    /// </summary>
+    public static string Fonte(FonteDoEscritorio fonte) => fonte switch
+    {
+        FonteDoEscritorio.Painel => "pelo endereço do Painel",
+        FonteDoEscritorio.Chatwoot => "pelo chat aberto no Chatwoot",
+        FonteDoEscritorio.Reuniao => "pelo título da reunião",
+        _ => "por uma regra do título",
+    };
+
     public static string Validade(VinculoDeEscritorio vinculo, JanelaDeValidade janela, DateTimeOffset agora)
     {
         ArgumentNullException.ThrowIfNull(vinculo);

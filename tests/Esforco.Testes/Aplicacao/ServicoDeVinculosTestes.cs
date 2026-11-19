@@ -459,7 +459,7 @@ public class ServicoDeVinculosTestes
     }
 
     [Fact]
-    public void Atalho_em_janela_sem_vinculo_ou_com_escritorio_descoberto_abre_em_branco()
+    public void Atalho_em_janela_sem_vinculo_abre_em_branco_e_no_painel_abre_com_o_escritorio_do_endereco()
     {
         var (servico, vinculos, leitor, _, relogio) = Criar();
         leitor.Proxima = new AmostraDeJanela("Excel", "custos.xlsx - Excel", false);
@@ -484,9 +484,12 @@ public class ServicoDeVinculosTestes
         Assert.Null(semVinculo.CopiarDe);
         Assert.Null(vinculos.Formulario(semVinculo).EmEdicao);
         Assert.Equal("", vinculos.Formulario(semVinculo).Escritorio);
+        Assert.Null(semVinculo.Identificado);
         Assert.True(descoberto.Descoberto);
+        Assert.Equal(new EscritorioIdentificado("1905", FonteDoEscritorio.Painel), descoberto.Identificado);
         Assert.Null(descoberto.VinculoId);
         Assert.Null(vinculos.Formulario(descoberto).EmEdicao);
+        Assert.Equal("1905", vinculos.Formulario(descoberto).Escritorio);
     }
 
     [Fact]

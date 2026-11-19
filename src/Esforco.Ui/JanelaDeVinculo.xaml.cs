@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Esforco.Aplicacao;
 using Esforco.Dominio;
 
@@ -16,6 +17,8 @@ public partial class JanelaDeVinculo : Window
     public const string TituloDaJanela = "Escritório e contagem da janela";
 
     private static readonly CultureInfo Cultura = CultureInfo.GetCultureInfo("pt-BR");
+    private static readonly Brush CorDeInformacao = Pincel(0x2F, 0x5D, 0x7C);
+    private static readonly Brush CorDeAlerta = Pincel(0x8A, 0x3B, 0x32);
 
     private readonly ServicoDeEsforco _servico;
     private readonly ServicoDeVinculos _vinculos;
@@ -153,7 +156,6 @@ public partial class JanelaDeVinculo : Window
         Mostrar(TextoTitulo, alvo.Titulo);
         Mostrar(TextoEndereco, alvo.Endereco);
         Mostrar(TextoPeriodo, alvo.DoCalendario ? Periodo(alvo.Inicio!.Value, alvo.Fim!.Value) : "");
-        AvisoDescoberto.Visibility = alvo.Descoberto ? Visibility.Visible : Visibility.Collapsed;
         PreencherSituacao(formulario);
 
         CarregarEscritorios(formulario);
@@ -373,18 +375,66 @@ public partial class JanelaDeVinculo : Window
 
     private void AoMudarTempo(object sender, SelectionChangedEventArgs e) => AjustarOpcoes();
 
+    private void AoMudarCategoria(object sender, TextChangedEventArgs e) => MostrarIdentificado();
+
     private void AjustarOpcoes()
     {
         if (!_pronta || _formulario is null)
             return;
 
-        var soRegistro = PainelDoRegistro.Visibility == Visibility.Visible && SoRegistro.IsChecked == true;
-        PainelDaValidade.Visibility = soRegistro ? Visibility.Collapsed : Visibility.Visible;
+        PainelDaValidade.Visibility = SoRegistroEscolhido() ? Visibility.Collapsed : Visibility.Visible;
         PainelDoPrazo.Visibility = ValidadeSempre.IsChecked == true ? Visibility.Collapsed : Visibility.Visible;
         RotuloDoTempo.Text = ValidadeInatividade.IsChecked == true ? "Sem voltar por" : "Por";
         var outro = Tempo.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
         OutroTempo.Visibility = outro;
         UnidadeDoTempo.Visibility = outro;
+        MostrarIdentificado();
+    }
+
+    private bool SoRegistroEscolhido() =>
+        PainelDoRegistro.Visibility == Visibility.Visible && SoRegistro.IsChecked == true;
+
+    private ValidadeDoVinculo ValidadeEscolhida() =>
+        SoRegistroEscolhido() || ValidadeSempre.IsChecked == true
+            ? ValidadeDoVinculo.Sempre
+            : ValidadePrazo.IsChecked == true ? ValidadeDoVinculo.Prazo : ValidadeDoVinculo.Inatividade;
+
+    private AlcanceDoVinculo AlcanceEscolhido() =>
+        AlcanceAba.IsChecked == true
+            ? AlcanceDoVinculo.Aba
+            : AlcanceJanela.IsChecked == true ? AlcanceDoVinculo.Janela : AlcanceDoVinculo.Programa;
+
+    /// <summary>
+    /// Quando o escritório veio do próprio Esforço, e não de um vínculo salvo, diz de onde veio e o que
+    /// Salvar faz com o que está marcado agora: nada, um vínculo, ou um vínculo que não muda este registro.
+    /// </summary>
+    private void MostrarIdentificado()
+    {
+        if (!_pronta || _formulario is null)
+            return;
+
+        var marcado = ListaDeEscritorios.SelectedItem as ItemDeEscritorio;
+        var aviso = _formulario.Identificado is EscritorioIdentificado achado
+            ? _formulario.Aviso(
+                NomeComId(achado.Id),
+                marcado?.Id,
+                marcado is null ? "" : NomeComId(marcado.Id),
+                CampoCategoria.Text,
+                AlcanceEscolhido(),
+                SoRegistroEscolhido(),
+                ValidadeEscolhida())
+            : null;
+        OrigemDoEscritorio.Text = aviso?.Origem ?? "";
+        OrigemDoEscritorio.Visibility = aviso is null ? Visibility.Collapsed : Visibility.Visible;
+        AoSalvarIdentificado.Text = aviso?.AoSalvar ?? "";
+        AoSalvarIdentificado.Foreground = aviso?.Alerta == true ? CorDeAlerta : CorDeInformacao;
+        AoSalvarIdentificado.Visibility = string.IsNullOrEmpty(aviso?.AoSalvar) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private string NomeComId(string id)
+    {
+        var nome = _escritorios.FirstOrDefault(item => item.Id == id)?.Nome ?? "";
+        return nome.Length > 0 ? $"{nome} (id {id})" : $"Escritório {id}";
     }
 
     private void AoBuscar(object sender, TextChangedEventArgs e)
@@ -405,6 +455,7 @@ public partial class JanelaDeVinculo : Window
             return;
 
         _escolhido = (ListaDeEscritorios.SelectedItem as ItemDeEscritorio)?.Id;
+        MostrarIdentificado();
     }
 
     private void AoTeclarNaBusca(object sender, KeyEventArgs e)
@@ -443,6 +494,7 @@ public partial class JanelaDeVinculo : Window
         }
 
         MostrarEscolhido();
+        MostrarIdentificado();
     }
 
     private void MostrarEscolhido()
@@ -475,10 +527,17 @@ public partial class JanelaDeVinculo : Window
             return;
         }
 
-        var soRegistro = PainelDoRegistro.Visibility == Visibility.Visible && SoRegistro.IsChecked == true;
-        var validade = soRegistro || ValidadeSempre.IsChecked == true
-            ? ValidadeDoVinculo.Sempre
-            : ValidadePrazo.IsChecked == true ? ValidadeDoVinculo.Prazo : ValidadeDoVinculo.Inatividade;
+        var soRegistro = SoRegistroEscolhido();
+        var validade = ValidadeEscolhida();
+        var alcance = AlcanceEscolhido();
+        if (_formulario.SoRepeteOIdentificado(escritorio.Id, CampoCategoria.Text, alcance, soRegistro, validade))
+        {
+            // O escritório marcado é o que o Esforço já identificou: um vínculo só repetiria isso.
+            Salvou = SalvarContagem();
+            Fechar();
+            return;
+        }
+
         var inicio = _formulario.Inicio;
         TimeSpan? duracao = null;
         if (validade != ValidadeDoVinculo.Sempre)
@@ -488,9 +547,6 @@ public partial class JanelaDeVinculo : Window
             duracao = lida;
         }
 
-        var alcance = AlcanceAba.IsChecked == true
-            ? AlcanceDoVinculo.Aba
-            : AlcanceJanela.IsChecked == true ? AlcanceDoVinculo.Janela : AlcanceDoVinculo.Programa;
         var pedido = new PedidoDeVinculo(
             escritorio.Id,
             null,
@@ -575,6 +631,13 @@ public partial class JanelaDeVinculo : Window
 
         duracao = UnidadeDoTempo.SelectedIndex == 1 ? TimeSpan.FromHours(numero) : TimeSpan.FromMinutes(numero);
         return true;
+    }
+
+    private static Brush Pincel(byte vermelho, byte verde, byte azul)
+    {
+        var pincel = new SolidColorBrush(Color.FromRgb(vermelho, verde, azul));
+        pincel.Freeze();
+        return pincel;
     }
 
     private static void Mostrar(TextBlock campo, string texto)

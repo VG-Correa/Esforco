@@ -31,15 +31,40 @@ public static class ResolvedorDeEscritorio
     /// O que o programa descobre sozinho vence o vínculo manual:
     /// o officeId do Painel, o título do chat no Chatwoot e o título da reunião.
     /// </summary>
-    public static bool Descoberto(IntervaloDeEsforco intervalo, NomesDePainel nomes)
+    public static bool Descoberto(IntervaloDeEsforco intervalo, NomesDePainel nomes) =>
+        Identificar(intervalo, nomes) is { VenceVinculo: true };
+
+    /// <summary>
+    /// Qual escritório o programa já sabe sozinho para o registro, e por onde soube. Nulo quando não sabe:
+    /// uma reunião cujo nome não é de nenhum escritório cadastrado fica sem escritório. A regra do título
+    /// só conta quando leva a um escritório cadastrado, e é a única fonte que perde para o vínculo.
+    /// </summary>
+    public static EscritorioIdentificado? Identificar(IntervaloDeEsforco intervalo, NomesDePainel nomes)
     {
         ArgumentNullException.ThrowIfNull(intervalo);
         ArgumentNullException.ThrowIfNull(nomes);
-        if ((intervalo.EhPainelSplitC || intervalo.EhChatwoot) && intervalo.Escritorio.Trim().Length > 0)
-            return true;
+        var campo = intervalo.Escritorio.Trim();
+        var doPainel = intervalo.EhPainelSplitC || intervalo.EhChatwoot;
+        if (doPainel && campo.Length > 0)
+        {
+            return new EscritorioIdentificado(
+                campo,
+                intervalo.EhPainelSplitC ? FonteDoEscritorio.Painel : FonteDoEscritorio.Chatwoot);
+        }
 
         var reuniao = InterpretadorDeReuniao.Ler(intervalo.Titulo);
-        return reuniao is not null && nomes.IdDaReuniao(reuniao.Nome) is not null;
+        if (reuniao is not null)
+        {
+            return nomes.IdDaReuniao(reuniao.Nome) is string daReuniao
+                ? new EscritorioIdentificado(daReuniao, FonteDoEscritorio.Reuniao)
+                : null;
+        }
+
+        if (doPainel || campo.Length == 0)
+            return null;
+
+        var daRegra = nomes.Conhece(campo) ? campo : nomes.IdDaReuniao(campo) ?? nomes.IdNoTexto(campo);
+        return daRegra is null ? null : new EscritorioIdentificado(daRegra, FonteDoEscritorio.Regra);
     }
 
     /// <summary>

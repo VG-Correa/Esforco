@@ -170,9 +170,9 @@ public sealed partial class ServicoDeEsforco
                 amostra.Minimizada,
                 agora)
             : IntervaloDeEsforco.AbrirPainel(titulo, local, amostra.Minimizada, agora);
-        var descoberto = ResolvedorDeEscritorio.Descoberto(rascunho, new NomesDePainel(_repositorio.ListarCadastros()));
-        var alvo = new AlvoDeVinculo(nome, titulo, local is null ? EnderecoDeAba.Normalizar(endereco) : "", Descoberto: descoberto);
-        if (descoberto || _vinculos is null)
+        var identificado = ResolvedorDeEscritorio.Identificar(rascunho, new NomesDePainel(_repositorio.ListarCadastros()));
+        var alvo = new AlvoDeVinculo(nome, titulo, local is null ? EnderecoDeAba.Normalizar(endereco) : "", Identificado: identificado);
+        if (alvo.Descoberto || _vinculos is null)
             return alvo;
 
         var contexto = _vinculos.Contexto();

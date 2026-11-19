@@ -298,7 +298,7 @@ public static class CalendarioDeEsforco
             intervalo.Programa,
             intervalo.Titulo,
             ValidadeDeVinculo.Endereco(intervalo, enderecos),
-            ResolvedorDeEscritorio.Descoberto(intervalo, nomes),
+            ResolvedorDeEscritorio.Identificar(intervalo, nomes),
             trecho.Vinculo?.VinculoId);
         var tipo = Classificar(intervalo);
         if (trecho.Vinculo is not null && tipo.Length == 0)
@@ -600,7 +600,15 @@ public static class CalendarioDeEsforco
 
     public const string TipoVinculo = "Vínculo";
 
-    private readonly record struct Origem(string Programa, string Titulo, string Endereco, bool Descoberto, long? VinculoId);
+    private readonly record struct Origem(
+        string Programa,
+        string Titulo,
+        string Endereco,
+        EscritorioIdentificado? Identificado,
+        long? VinculoId)
+    {
+        public bool Descoberto => Identificado is { VenceVinculo: true };
+    }
 
     private readonly record struct Descricao(string Titulo, string Subtitulo, string Chave, string Tipo, Origem Origem);
 
@@ -657,6 +665,6 @@ public static class CalendarioDeEsforco
         }
 
         public AlvoDeVinculo Concluir() =>
-            new(_origem.Programa, _origem.Titulo, _origem.Endereco, _inicio, _fim, _origem.Descoberto, _origem.VinculoId);
+            new(_origem.Programa, _origem.Titulo, _origem.Endereco, _inicio, _fim, _origem.Identificado, _origem.VinculoId);
     }
 }

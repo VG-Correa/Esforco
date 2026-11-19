@@ -14,10 +14,31 @@ public enum ValidadeDoVinculo
     Inatividade = 2,
 }
 
+public enum FonteDoEscritorio
+{
+    Painel = 0,
+    Chatwoot = 1,
+    Reuniao = 2,
+    Regra = 3,
+}
+
+/// <summary>
+/// O escritório que o Esforço identificou sozinho para um registro, e de onde tirou: o officeId do
+/// endereço do Painel, o chat aberto no Chatwoot, o título da reunião ou uma regra do título.
+/// </summary>
+public readonly record struct EscritorioIdentificado(string Id, FonteDoEscritorio Fonte)
+{
+    /// <summary>
+    /// Painel, Chatwoot e reunião vencem o vínculo manual. A regra do título perde para ele.
+    /// </summary>
+    public bool VenceVinculo => Fonte != FonteDoEscritorio.Regra;
+}
+
 /// <summary>
 /// O que a janelinha de vínculo descreve: a janela da frente ou a faixa clicada no calendário.
-/// Inicio e Fim só vêm do calendário. VinculoId é o vínculo que já cobre esse alvo e que a janelinha
-/// edita. CopiarDe é um vínculo que já terminou: os campos saem dele, mas salvar cria outro.
+/// Inicio e Fim só vêm do calendário. Identificado é o escritório que o Esforço já achou sozinho.
+/// VinculoId é o vínculo que já cobre esse alvo e que a janelinha edita. CopiarDe é um vínculo que
+/// já terminou: os campos saem dele, mas salvar cria outro.
 /// </summary>
 public sealed record AlvoDeVinculo(
     string Programa,
@@ -25,11 +46,16 @@ public sealed record AlvoDeVinculo(
     string Endereco = "",
     DateTimeOffset? Inicio = null,
     DateTimeOffset? Fim = null,
-    bool Descoberto = false,
+    EscritorioIdentificado? Identificado = null,
     long? VinculoId = null,
     long? CopiarDe = null)
 {
     public bool DoCalendario => Inicio is not null && Fim is not null;
+
+    /// <summary>
+    /// Verdadeiro quando o escritório identificado vence o vínculo: neste registro o vínculo não tem efeito.
+    /// </summary>
+    public bool Descoberto => Identificado is { VenceVinculo: true };
 }
 
 public sealed record PedidoDeVinculo(
