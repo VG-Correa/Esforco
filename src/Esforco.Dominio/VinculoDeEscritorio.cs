@@ -16,7 +16,8 @@ public enum ValidadeDoVinculo
 
 /// <summary>
 /// O que a janelinha de vínculo descreve: a janela da frente ou a faixa clicada no calendário.
-/// Inicio e Fim só vêm do calendário.
+/// Inicio e Fim só vêm do calendário. VinculoId é o vínculo que já cobre esse alvo e que a janelinha
+/// edita. CopiarDe é um vínculo que já terminou: os campos saem dele, mas salvar cria outro.
 /// </summary>
 public sealed record AlvoDeVinculo(
     string Programa,
@@ -24,7 +25,9 @@ public sealed record AlvoDeVinculo(
     string Endereco = "",
     DateTimeOffset? Inicio = null,
     DateTimeOffset? Fim = null,
-    bool Descoberto = false)
+    bool Descoberto = false,
+    long? VinculoId = null,
+    long? CopiarDe = null)
 {
     public bool DoCalendario => Inicio is not null && Fim is not null;
 }

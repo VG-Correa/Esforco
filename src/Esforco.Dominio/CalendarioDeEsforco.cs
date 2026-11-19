@@ -298,7 +298,8 @@ public static class CalendarioDeEsforco
             intervalo.Programa,
             intervalo.Titulo,
             ValidadeDeVinculo.Endereco(intervalo, enderecos),
-            ResolvedorDeEscritorio.Descoberto(intervalo, nomes));
+            ResolvedorDeEscritorio.Descoberto(intervalo, nomes),
+            trecho.Vinculo?.VinculoId);
         var tipo = Classificar(intervalo);
         if (trecho.Vinculo is not null && tipo.Length == 0)
             tipo = TipoVinculo;
@@ -599,7 +600,7 @@ public static class CalendarioDeEsforco
 
     public const string TipoVinculo = "Vínculo";
 
-    private readonly record struct Origem(string Programa, string Titulo, string Endereco, bool Descoberto);
+    private readonly record struct Origem(string Programa, string Titulo, string Endereco, bool Descoberto, long? VinculoId);
 
     private readonly record struct Descricao(string Titulo, string Subtitulo, string Chave, string Tipo, Origem Origem);
 
@@ -615,7 +616,8 @@ public static class CalendarioDeEsforco
 
     /// <summary>
     /// Junta as fatias de uma faixa fundida: o período inteiro e a janela que mais durou,
-    /// de preferência uma sem escritório descoberto, que é onde o vínculo manual tem efeito.
+    /// de preferência uma sem escritório descoberto, que é onde o vínculo manual tem efeito,
+    /// e entre essas uma que já tenha vínculo, para o clique abrir o que foi configurado.
     /// </summary>
     private sealed class AlvoEmFaixa
     {
@@ -641,9 +643,12 @@ public static class CalendarioDeEsforco
 
             var origem = fatia.Descricao.Origem;
             var peso = fatia.FimReal - fatia.InicioReal;
+            var vinculada = origem.VinculoId is not null;
             var melhor = origem.Descoberto != _origem.Descoberto
                 ? !origem.Descoberto
-                : peso > _peso;
+                : vinculada != (_origem.VinculoId is not null)
+                    ? vinculada
+                    : peso > _peso;
             if (!melhor)
                 return;
 
@@ -652,6 +657,6 @@ public static class CalendarioDeEsforco
         }
 
         public AlvoDeVinculo Concluir() =>
-            new(_origem.Programa, _origem.Titulo, _origem.Endereco, _inicio, _fim, _origem.Descoberto);
+            new(_origem.Programa, _origem.Titulo, _origem.Endereco, _inicio, _fim, _origem.Descoberto, _origem.VinculoId);
     }
 }

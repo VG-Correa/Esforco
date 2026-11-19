@@ -19,75 +19,75 @@ public partial class JanelaDeVinculo : Window
 
     private readonly ServicoDeEsforco _servico;
     private readonly ServicoDeVinculos _vinculos;
-    private readonly AlvoDeVinculo? _alvo;
-    private readonly VinculoDeEscritorio? _emEdicao;
-    private readonly DateTimeOffset _inicioPadrao;
-    private readonly AlcanceDoVinculo? _alcancePadrao;
+    private readonly AlvoDeVinculo? _origem;
+    private readonly AlcanceDoVinculo? _alcanceSugerido;
     private readonly List<ItemDeEscritorio> _escritorios = [];
+    private FormularioDeVinculo? _formulario;
+    private string? _escolhido;
     private string _diaPadrao = "";
     private string _horaPadrao = "";
+    private bool _filtrando;
     private bool _modal;
     private bool _pronta;
 
+    /// <summary>
+    /// Origem é a janela da frente ou a faixa do calendário, guardada para o botão que troca
+    /// a edição por um vínculo novo. A tela de vínculos salvos não tem origem.
+    /// </summary>
     private JanelaDeVinculo(
         ServicoDeEsforco servico,
         ServicoDeVinculos vinculos,
-        AlvoDeVinculo? alvo,
-        VinculoDeEscritorio? emEdicao,
-        DateTimeOffset inicioPadrao,
-        AlcanceDoVinculo? alcancePadrao = null)
+        FormularioDeVinculo? formulario,
+        AlvoDeVinculo? origem = null,
+        AlcanceDoVinculo? alcanceSugerido = null)
     {
         InitializeComponent();
-        _alcancePadrao = alcancePadrao;
         Title = TituloDaJanela;
         _servico = servico;
         _vinculos = vinculos;
-        _alvo = alvo;
-        _emEdicao = emEdicao;
-        _inicioPadrao = inicioPadrao;
+        _origem = origem;
+        _alcanceSugerido = alcanceSugerido;
+        MaxHeight = SystemParameters.WorkArea.Height;
         Loaded += (_, _) =>
         {
-            if (PainelDoVinculo.Visibility == Visibility.Visible)
-                Busca.Focus();
+            ManterNaTela();
+            if (PainelDoVinculo.Visibility != Visibility.Visible)
+                return;
+
+            MostrarEscolhido();
+            Busca.Focus();
         };
-        Preencher();
-        _pronta = true;
-        AjustarOpcoes();
+        SizeChanged += (_, _) => ManterNaTela();
+        Preencher(formulario);
     }
 
     public bool Salvou { get; private set; }
 
     /// <summary>
     /// Aberta pelo atalho. Sem alvo, o Esforço estava parado e nada foi lido.
+    /// Se a janela da frente já tem vínculo, abre com ele.
     /// </summary>
     public static JanelaDeVinculo DoAtalho(ServicoDeEsforco servico, ServicoDeVinculos vinculos, AlvoDeVinculo? alvo) =>
-        new(servico, vinculos, alvo, null, DateTimeOffset.Now)
+        new(servico, vinculos, alvo is null ? null : vinculos.Formulario(alvo), alvo)
         {
             Topmost = true,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
         };
 
     /// <summary>
-    /// Aberta pelo clique numa faixa do calendário. Na vista de programas a faixa junta todas as
-    /// telas do programa, então o alcance sugerido é o programa inteiro, para cobrir a faixa toda.
+    /// Aberta pelo clique numa faixa do calendário. Se a faixa já tem vínculo, abre com ele.
+    /// Na vista de programas a faixa junta todas as telas do programa, então o alcance sugerido
+    /// para um vínculo novo é o programa inteiro, para cobrir a faixa toda.
     /// </summary>
     public static JanelaDeVinculo DoCalendario(
         ServicoDeEsforco servico,
         ServicoDeVinculos vinculos,
         AlvoDeVinculo alvo,
         AlcanceDoVinculo? alcance = null) =>
-        new(servico, vinculos, alvo, null, alvo.Inicio ?? DateTimeOffset.Now, alcance);
+        new(servico, vinculos, vinculos.Formulario(alvo, alcance), alvo, alcance);
 
-    public static JanelaDeVinculo DaEdicao(ServicoDeEsforco servico, ServicoDeVinculos vinculos, VinculoDeEscritorio vinculo)
-    {
-        var alvo = new AlvoDeVinculo(
-            vinculo.Programa,
-            vinculo.Titulo,
-            vinculo.Endereco,
-            vinculo.SoRegistro ? vinculo.Inicio : null,
-            vinculo.SoRegistro ? vinculo.Inicio + (vinculo.Duracao ?? TimeSpan.Zero) : null);
-        return new JanelaDeVinculo(servico, vinculos, alvo, vinculo, vinculo.Inicio);
-    }
+    public static JanelaDeVinculo DaEdicao(ServicoDeEsforco servico, ServicoDeVinculos vinculos, VinculoDeEscritorio vinculo) =>
+        new(servico, vinculos, FormularioDeVinculo.DoVinculo(vinculo));
 
     /// <summary>
     /// Abre como diálogo da janela principal. Enquanto estiver aberta, o tempo segue contando
@@ -111,40 +111,114 @@ public partial class JanelaDeVinculo : Window
         return Salvou;
     }
 
-    private void Preencher()
+    /// <summary>
+    /// A janelinha cresce para baixo quando um campo a mais aparece. Se com isso ela passar do fim
+    /// da tela, sobe o que faltar. Só mexe nela mesma, e só na tela principal, que é a única de que
+    /// dá para saber a área útil sem chamar o Windows.
+    /// </summary>
+    private void ManterNaTela()
     {
-        if (_alvo is null)
+        if (!IsLoaded || WindowState != WindowState.Normal || double.IsNaN(Left) || double.IsNaN(Top))
+            return;
+
+        var tela = new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+        if (!tela.Contains(new Point(Left + ActualWidth / 2, Top + ActualHeight / 2)))
+            return;
+
+        var area = SystemParameters.WorkArea;
+        var topo = Math.Max(area.Top, Math.Min(Top, area.Bottom - ActualHeight));
+        if (Math.Abs(topo - Top) > 0.5)
+            Top = topo;
+    }
+
+    private void Preencher(FormularioDeVinculo? formulario)
+    {
+        _pronta = false;
+        _formulario = formulario;
+        if (formulario is null)
         {
             PainelParado.Visibility = Visibility.Visible;
             PainelDoVinculo.Visibility = Visibility.Collapsed;
             return;
         }
 
-        Cabecalho.Text = _emEdicao is not null
+        var alvo = formulario.Alvo;
+        var emEdicao = formulario.EmEdicao is not null;
+        Cabecalho.Text = emEdicao
             ? "Vínculo salvo"
-            : _alvo.DoCalendario ? "Registro do calendário" : "O que está sendo registrado";
-        TextoPrograma.Text = _alvo.Programa;
-        Mostrar(TextoTitulo, _alvo.Titulo);
-        Mostrar(TextoEndereco, _alvo.Endereco);
-        Mostrar(TextoPeriodo, _alvo.DoCalendario ? Periodo(_alvo.Inicio!.Value, _alvo.Fim!.Value) : "");
-        AvisoDescoberto.Visibility = _alvo.Descoberto ? Visibility.Visible : Visibility.Collapsed;
+            : alvo.DoCalendario ? "Registro do calendário" : "O que está sendo registrado";
+        TextoPrograma.Text = alvo.Programa;
+        Mostrar(TextoTitulo, alvo.Titulo);
+        Mostrar(TextoEndereco, alvo.Endereco);
+        Mostrar(TextoPeriodo, alvo.DoCalendario ? Periodo(alvo.Inicio!.Value, alvo.Fim!.Value) : "");
+        AvisoDescoberto.Visibility = alvo.Descoberto ? Visibility.Visible : Visibility.Collapsed;
+        PreencherSituacao(formulario);
 
-        CarregarEscritorios();
-        CarregarCategorias();
-        PreencherAlcance();
-        PreencherValidade();
-        if (_emEdicao is not null)
-            BotaoSalvar.Content = "Salvar";
+        CarregarEscritorios(formulario);
+        CarregarCategorias(formulario);
+        PreencherAlcance(formulario);
+        PreencherValidade(formulario);
+        BotaoSalvar.Content = emEdicao ? "Salvar" : "Vincular";
+        Aviso.Text = "";
+        _pronta = true;
+        AjustarOpcoes();
     }
 
-    private void CarregarEscritorios()
+    /// <summary>
+    /// Diz quando a janelinha abriu com um vínculo que já existia, e o que salvar faz com ele.
+    /// </summary>
+    private void PreencherSituacao(FormularioDeVinculo formulario)
+    {
+        var doCalendario = _origem?.DoCalendario == true;
+        var texto = "";
+        if (formulario.EmEdicao is not null && _origem is not null)
+        {
+            texto = doCalendario
+                ? "Registro já vinculado. Salvar altera o vínculo."
+                : "Janela já vinculada. Salvar altera o vínculo.";
+        }
+        else if (formulario.Copia)
+        {
+            texto = "Campos do último vínculo desta janela, que já terminou. Vincular cria outro e o antigo fica como está.";
+        }
+
+        Situacao.Text = texto;
+        PainelDaSituacao.Visibility = texto.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var podeTrocar = _origem is not null && (formulario.EmEdicao is not null || formulario.Copia);
+        BotaoOutroVinculo.Content = formulario.Copia ? "Limpar os campos" : "Criar outro vínculo";
+        BotaoOutroVinculo.Visibility = podeTrocar ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void CriarOutro(object sender, RoutedEventArgs e)
+    {
+        if (_origem is null)
+            return;
+
+        Busca.Text = "";
+        Preencher(_vinculos.FormularioNovo(_origem, _alcanceSugerido));
+        Busca.Focus();
+    }
+
+    private void CarregarEscritorios(FormularioDeVinculo formulario)
     {
         _escritorios.Clear();
         foreach (var escritorio in _servico.ListarEscritoriosComNome())
             _escritorios.Add(new ItemDeEscritorio(escritorio.Id, $"{escritorio.Nome}  ·  id {escritorio.Id}", escritorio.Nome));
 
-        if (_emEdicao is not null && _escritorios.All(item => item.Id != _emEdicao.Escritorio))
-            _escritorios.Add(new ItemDeEscritorio(_emEdicao.Escritorio, $"Escritório {_emEdicao.Escritorio}", ""));
+        var salvo = formulario.Escritorio;
+        if (salvo.Length > 0 && _escritorios.All(item => item.Id != salvo))
+            _escritorios.Add(new ItemDeEscritorio(salvo, $"Escritório {salvo}", ""));
+
+        _escolhido = salvo.Length > 0 ? salvo : null;
+        _filtrando = true;
+        try
+        {
+            ListaDeEscritorios.SelectedItem = null;
+        }
+        finally
+        {
+            _filtrando = false;
+        }
 
         if (_escritorios.Count == 0)
         {
@@ -156,79 +230,57 @@ public partial class JanelaDeVinculo : Window
         }
 
         Filtrar();
-        if (_emEdicao is not null)
-            ListaDeEscritorios.SelectedItem = _escritorios.FirstOrDefault(item => item.Id == _emEdicao.Escritorio);
     }
 
-    private void CarregarCategorias()
+    private void CarregarCategorias(FormularioDeVinculo formulario)
     {
         var categorias = _vinculos.ListarCategorias();
         CampoCategoria.ItemsSource = categorias.Select(item => item.Nome).ToList();
-        if (_emEdicao?.CategoriaId is long id)
-            CampoCategoria.Text = categorias.FirstOrDefault(item => item.Id == id)?.Nome ?? "";
+        CampoCategoria.Text = formulario.CategoriaId is long id
+            ? categorias.FirstOrDefault(item => item.Id == id)?.Nome ?? ""
+            : "";
     }
 
-    private void PreencherAlcance()
+    private void PreencherAlcance(FormularioDeVinculo formulario)
     {
-        var temTitulo = _alvo!.Titulo.Trim().Length > 0;
-        var temEndereco = _alvo.Endereco.Trim().Length > 0;
-        AlcancePrograma.Content = $"O programa inteiro ({_alvo.Programa})";
-        AlcanceJanela.IsEnabled = temTitulo;
-        AlcanceAba.IsEnabled = temTitulo || temEndereco;
-        AlcanceAba.Content = temEndereco
+        var alvo = formulario.Alvo;
+        AlcancePrograma.Content = $"O programa inteiro ({alvo.Programa})";
+        AlcanceJanela.IsEnabled = formulario.PodeJanela;
+        AlcanceAba.IsEnabled = formulario.PodeAba;
+        AlcanceAba.Content = alvo.Endereco.Trim().Length > 0
             ? "Esta aba, pelo título ou pelo endereço"
             : "Esta aba, pelo título";
 
-        var alcance = _emEdicao?.Alcance
-            ?? _alcancePadrao
-            ?? (temEndereco ? AlcanceDoVinculo.Aba : temTitulo ? AlcanceDoVinculo.Janela : AlcanceDoVinculo.Programa);
-        if ((alcance == AlcanceDoVinculo.Janela && !temTitulo) || (alcance == AlcanceDoVinculo.Aba && !temTitulo && !temEndereco))
-            alcance = AlcanceDoVinculo.Programa;
-        AlcancePrograma.IsChecked = alcance == AlcanceDoVinculo.Programa;
-        AlcanceJanela.IsChecked = alcance == AlcanceDoVinculo.Janela;
-        AlcanceAba.IsChecked = alcance == AlcanceDoVinculo.Aba;
+        AlcancePrograma.IsChecked = formulario.Alcance == AlcanceDoVinculo.Programa;
+        AlcanceJanela.IsChecked = formulario.Alcance == AlcanceDoVinculo.Janela;
+        AlcanceAba.IsChecked = formulario.Alcance == AlcanceDoVinculo.Aba;
     }
 
-    private void PreencherValidade()
+    private void PreencherValidade(FormularioDeVinculo formulario)
     {
-        var local = _inicioPadrao.ToLocalTime();
+        var local = formulario.Inicio.ToLocalTime();
         DiaDoInicio.SelectedDate = local.Date;
         HoraDoInicio.Text = local.ToString("HH:mm", Cultura);
         _diaPadrao = local.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         _horaPadrao = HoraDoInicio.Text;
 
-        if (_alvo!.DoCalendario)
-        {
-            PainelDoRegistro.Visibility = Visibility.Visible;
-            SoRegistro.Content = $"Só este registro, {Periodo(_alvo.Inicio!.Value, _alvo.Fim!.Value)}";
-            if (_emEdicao is not null)
-                return;
-        }
+        var alvo = formulario.Alvo;
+        PainelDoRegistro.Visibility = formulario.OfereceRegistro ? Visibility.Visible : Visibility.Collapsed;
+        if (formulario.OfereceRegistro)
+            SoRegistro.Content = $"Só este registro, {Periodo(alvo.Inicio!.Value, alvo.Fim!.Value)}";
+        SoRegistro.IsChecked = formulario.SoRegistro;
+        SempreRegistro.IsChecked = !formulario.SoRegistro;
 
-        if (_emEdicao is null || _emEdicao.SoRegistro)
-            return;
+        ValidadeSempre.IsChecked = formulario.Validade == ValidadeDoVinculo.Sempre;
+        ValidadePrazo.IsChecked = formulario.Validade == ValidadeDoVinculo.Prazo;
+        ValidadeInatividade.IsChecked = formulario.Validade == ValidadeDoVinculo.Inatividade;
 
-        ValidadePrazo.IsChecked = _emEdicao.Validade == ValidadeDoVinculo.Prazo;
-        ValidadeInatividade.IsChecked = _emEdicao.Validade == ValidadeDoVinculo.Inatividade;
-        if (_emEdicao.Duracao is not TimeSpan duracao)
-            return;
-
-        if (duracao == TimeSpan.FromMinutes(30))
-        {
-            Tempo.SelectedIndex = 0;
-        }
-        else if (duracao == TimeSpan.FromHours(1))
-        {
-            Tempo.SelectedIndex = 1;
-        }
-        else
-        {
-            Tempo.SelectedIndex = 2;
-            var emHoras = duracao.TotalMinutes >= 60 && duracao.TotalMinutes % 60 == 0;
-            UnidadeDoTempo.SelectedIndex = emHoras ? 1 : 0;
-            OutroTempo.Text = Math.Max(1, Math.Round(emHoras ? duracao.TotalHours : duracao.TotalMinutes))
-                .ToString(CultureInfo.InvariantCulture);
-        }
+        var tempo = formulario.Tempo;
+        Tempo.SelectedIndex = (int)tempo.Opcao;
+        UnidadeDoTempo.SelectedIndex = tempo.EmHoras ? 1 : 0;
+        OutroTempo.Text = tempo.Opcao == OpcaoDeTempo.Outro
+            ? tempo.Quantidade.ToString(CultureInfo.InvariantCulture)
+            : "";
     }
 
     private void AoMudarOpcao(object sender, RoutedEventArgs e) => AjustarOpcoes();
@@ -237,7 +289,7 @@ public partial class JanelaDeVinculo : Window
 
     private void AjustarOpcoes()
     {
-        if (!_pronta || _alvo is null)
+        if (!_pronta || _formulario is null)
             return;
 
         var soRegistro = PainelDoRegistro.Visibility == Visibility.Visible && SoRegistro.IsChecked == true;
@@ -255,8 +307,18 @@ public partial class JanelaDeVinculo : Window
             return;
 
         Filtrar();
-        if (Busca.Text.Trim().Length > 0 && ListaDeEscritorios.Items.Count > 0)
-            ListaDeEscritorios.SelectedIndex = 0;
+    }
+
+    /// <summary>
+    /// Só a escolha feita pela pessoa, com o mouse ou as setas, vira o escritório escolhido.
+    /// A marcação que a busca faz sozinha não troca a escolha.
+    /// </summary>
+    private void AoEscolherEscritorio(object sender, SelectionChangedEventArgs e)
+    {
+        if (_filtrando)
+            return;
+
+        _escolhido = (ListaDeEscritorios.SelectedItem as ItemDeEscritorio)?.Id;
     }
 
     private void AoTeclarNaBusca(object sender, KeyEventArgs e)
@@ -270,31 +332,42 @@ public partial class JanelaDeVinculo : Window
 
         var indice = ListaDeEscritorios.SelectedIndex + (e.Key == Key.Down ? 1 : -1);
         ListaDeEscritorios.SelectedIndex = Math.Clamp(indice, 0, total - 1);
-        ListaDeEscritorios.ScrollIntoView(ListaDeEscritorios.SelectedItem);
+        MostrarEscolhido();
         e.Handled = true;
     }
 
     private void Filtrar()
     {
-        var escolhido = ListaDeEscritorios.SelectedItem as ItemDeEscritorio;
-        var texto = Busca.Text.Trim();
-        var comparador = Cultura.CompareInfo;
-        var achados = texto.Length == 0
-            ? _escritorios
-            : _escritorios
-                .Where(item => comparador.IndexOf(
-                    item.Rotulo,
-                    texto,
-                    CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0)
-                .ToList();
-        ListaDeEscritorios.ItemsSource = achados;
-        if (escolhido is not null && achados.Contains(escolhido))
-            ListaDeEscritorios.SelectedItem = escolhido;
+        var marcado = (ListaDeEscritorios.SelectedItem as ItemDeEscritorio)?.Id;
+        var achados = BuscaDeEscritorio.Filtrar(_escritorios, Busca.Text, item => item.Rotulo).ToList();
+        var id = BuscaDeEscritorio.Marcar(
+            _escolhido,
+            marcado,
+            achados.Select(item => item.Id).ToList(),
+            Busca.Text.Trim().Length > 0);
+        _filtrando = true;
+        try
+        {
+            ListaDeEscritorios.ItemsSource = achados;
+            ListaDeEscritorios.SelectedItem = id is null ? null : achados.FirstOrDefault(item => item.Id == id);
+        }
+        finally
+        {
+            _filtrando = false;
+        }
+
+        MostrarEscolhido();
+    }
+
+    private void MostrarEscolhido()
+    {
+        if (ListaDeEscritorios.SelectedItem is object item)
+            ListaDeEscritorios.ScrollIntoView(item);
     }
 
     private void Confirmar(object sender, RoutedEventArgs e)
     {
-        if (_alvo is null)
+        if (_formulario is null)
         {
             Close();
             return;
@@ -310,7 +383,7 @@ public partial class JanelaDeVinculo : Window
         var validade = soRegistro || ValidadeSempre.IsChecked == true
             ? ValidadeDoVinculo.Sempre
             : ValidadePrazo.IsChecked == true ? ValidadeDoVinculo.Prazo : ValidadeDoVinculo.Inatividade;
-        var inicio = _inicioPadrao;
+        var inicio = _formulario.Inicio;
         TimeSpan? duracao = null;
         if (validade != ValidadeDoVinculo.Sempre)
         {
@@ -326,15 +399,13 @@ public partial class JanelaDeVinculo : Window
             escritorio.Id,
             null,
             alcance,
-            _alvo,
+            _formulario.Alvo,
             validade,
             inicio,
             duracao,
             soRegistro,
             CampoCategoria.Text ?? "");
-        var resultado = _emEdicao is null
-            ? _servico.Vincular(pedido)
-            : _vinculos.Editar(_emEdicao.Id, pedido);
+        var resultado = _servico.SalvarVinculo(_formulario.EmEdicao, pedido);
         if (resultado.Aviso is not null)
         {
             Aviso.Text = resultado.Aviso;
@@ -366,7 +437,7 @@ public partial class JanelaDeVinculo : Window
 
     private bool LerInicio(out DateTimeOffset inicio)
     {
-        inicio = _inicioPadrao;
+        inicio = _formulario!.Inicio;
         if (DiaDoInicio.SelectedDate is not DateTime dia)
         {
             Aviso.Text = "Escolha o dia em que o vínculo começa.";

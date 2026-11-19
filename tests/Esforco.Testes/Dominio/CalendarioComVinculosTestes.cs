@@ -124,6 +124,97 @@ public class CalendarioComVinculosTestes
         Assert.Equal("", Assert.Single(blocos, bloco => bloco.Titulo == "Excel").Tipo);
     }
 
+    [Fact]
+    public void Faixa_vinculada_por_um_minuto_diz_qual_vinculo_o_clique_abre()
+    {
+        var word = Janela("Word", "Contrato NTM", Em(17, 10, 0), Em(17, 10, 30));
+        var vinculos = Contexto([
+            Novo(
+                7,
+                "2200",
+                AlcanceDoVinculo.Janela,
+                "Word",
+                "Contrato NTM - Word",
+                validade: ValidadeDoVinculo.Prazo,
+                inicio: Em(17, 10, 10),
+                duracao: TimeSpan.FromMinutes(1)),
+        ]);
+
+        var bloco = Assert.Single(Dia([word], ModoDoCalendario.Escritorios, vinculos).Blocos);
+
+        Assert.Equal("NTM", bloco.Titulo);
+        Assert.Equal(10 * 60 + 10, bloco.InicioMinuto);
+        Assert.Equal(10 * 60 + 11, bloco.FimMinuto);
+        Assert.Equal(7, bloco.Alvo!.VinculoId);
+        Assert.Equal(Em(17, 10, 10), bloco.Alvo.Inicio);
+        Assert.Equal(Em(17, 10, 11), bloco.Alvo.Fim);
+    }
+
+    [Fact]
+    public void Faixa_sem_vinculo_nao_aponta_vinculo_nenhum()
+    {
+        var word = Janela("Word", "Contrato NTM", Em(17, 10, 0), Em(17, 10, 30));
+        var vinculos = Contexto([Novo(1, "2200", AlcanceDoVinculo.Programa, "Excel")]);
+
+        var bloco = Assert.Single(Dia([word], ModoDoCalendario.Programas, vinculos).Blocos);
+
+        Assert.Null(bloco.Alvo!.VinculoId);
+        Assert.Null(bloco.Alvo.CopiarDe);
+    }
+
+    [Fact]
+    public void Faixa_fundida_abre_o_vinculo_mesmo_quando_o_pedaco_vinculado_e_o_menor()
+    {
+        var word = Janela("Word", "Contrato NTM", Em(17, 10, 0), Em(17, 10, 40));
+        var vinculos = Contexto([
+            Novo(
+                7,
+                "2200",
+                AlcanceDoVinculo.Janela,
+                "Word",
+                "Contrato NTM - Word",
+                validade: ValidadeDoVinculo.Prazo,
+                inicio: Em(17, 10, 10),
+                duracao: TimeSpan.FromMinutes(1)),
+        ]);
+
+        var bloco = Assert.Single(Dia([word], ModoDoCalendario.Programas, vinculos).Blocos);
+
+        Assert.Equal(10 * 60, bloco.InicioMinuto);
+        Assert.Equal(10 * 60 + 40, bloco.FimMinuto);
+        Assert.Equal(7, bloco.Alvo!.VinculoId);
+    }
+
+    [Fact]
+    public void Faixa_com_dois_vinculos_abre_o_que_cobriu_mais_tempo()
+    {
+        var word = Janela("Word", "Contrato NTM", Em(17, 10, 0), Em(17, 10, 40));
+        var vinculos = Contexto([
+            Novo(
+                7,
+                "2200",
+                AlcanceDoVinculo.Janela,
+                "Word",
+                "Contrato NTM - Word",
+                validade: ValidadeDoVinculo.Prazo,
+                inicio: Em(17, 10, 0),
+                duracao: TimeSpan.FromMinutes(5)),
+            Novo(
+                8,
+                "2200",
+                AlcanceDoVinculo.Janela,
+                "Word",
+                "Contrato NTM - Word",
+                validade: ValidadeDoVinculo.Prazo,
+                inicio: Em(17, 10, 5),
+                duracao: TimeSpan.FromMinutes(35)),
+        ]);
+
+        var bloco = Assert.Single(Dia([word], ModoDoCalendario.Escritorios, vinculos).Blocos);
+
+        Assert.Equal(8, bloco.Alvo!.VinculoId);
+    }
+
     private static DiaDeCalendario Dia(
         IEnumerable<IntervaloDeEsforco> intervalos,
         ModoDoCalendario modo,

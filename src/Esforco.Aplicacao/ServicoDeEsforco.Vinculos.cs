@@ -81,13 +81,18 @@ public sealed partial class ServicoDeEsforco
             .ThenBy(item => item.Id, StringComparer.Ordinal)
             .ToList();
 
-    public ResultadoDeVinculo Vincular(PedidoDeVinculo pedido)
+    public ResultadoDeVinculo Vincular(PedidoDeVinculo pedido) => SalvarVinculo(null, pedido);
+
+    /// <summary>
+    /// Grava o que a janelinha mostra. Com emEdicao, altera esse vínculo; sem, cria outro.
+    /// </summary>
+    public ResultadoDeVinculo SalvarVinculo(long? emEdicao, PedidoDeVinculo pedido)
     {
         ArgumentNullException.ThrowIfNull(pedido);
         if (_vinculos is null)
             return new ResultadoDeVinculo(null, "O cadastro de vínculos não está disponível.");
 
-        var resultado = _vinculos.Criar(pedido);
+        var resultado = emEdicao is long existente ? _vinculos.Editar(existente, pedido) : _vinculos.Criar(pedido);
         if (resultado.Vinculo is not { Alcance: AlcanceDoVinculo.Aba } vinculo || vinculo.Endereco.Length == 0)
             return resultado;
 
@@ -166,7 +171,27 @@ public sealed partial class ServicoDeEsforco
                 agora)
             : IntervaloDeEsforco.AbrirPainel(titulo, local, amostra.Minimizada, agora);
         var descoberto = ResolvedorDeEscritorio.Descoberto(rascunho, new NomesDePainel(_repositorio.ListarCadastros()));
-        return new AlvoDeVinculo(nome, titulo, local is null ? EnderecoDeAba.Normalizar(endereco) : "", Descoberto: descoberto);
+        var alvo = new AlvoDeVinculo(nome, titulo, local is null ? EnderecoDeAba.Normalizar(endereco) : "", Descoberto: descoberto);
+        if (descoberto || _vinculos is null)
+            return alvo;
+
+        var contexto = _vinculos.Contexto();
+        if (contexto.Vinculos.Count == 0)
+            return alvo;
+
+        var achado = VinculoDaJanela.Achar(
+            alvo.Programa,
+            alvo.Titulo,
+            alvo.Endereco,
+            contexto,
+            ContinuidadeDeReuniao.Unir(_repositorio.Listar()),
+            agora);
+        if (achado is null)
+            return alvo;
+
+        return achado.Terminou
+            ? alvo with { CopiarDe = achado.Vinculo.Id }
+            : alvo with { VinculoId = achado.Vinculo.Id };
     }
 
     /// <summary>

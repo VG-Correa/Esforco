@@ -293,6 +293,258 @@ public class ServicoDeVinculosTestes
         Assert.Equal("Ctrl+Shift+F9", vinculos.LerAtalho().ToString());
     }
 
+    [Fact]
+    public void Clique_na_faixa_vinculada_abre_o_vinculo_e_salvar_altera_o_mesmo_sem_criar_outro()
+    {
+        var (servico, vinculos, leitor, repositorio, relogio) = Criar();
+        repositorio.DefinirNomeDeEscritorio("2200", "Galena");
+        repositorio.DefinirNomeDeEscritorio("1905", "Concha y Toro");
+        leitor.Proxima = new AmostraDeJanela("Excel", "custos.xlsx - Excel", false);
+        servico.Iniciar();
+        Avancar(servico, relogio, 5);
+        var criado = VincularPorUmMinuto(servico, relogio, "2200", "Planilhas");
+        Avancar(servico, relogio, 10);
+
+        var bloco = Assert.Single(FaixasDeEscritorio(servico));
+        var formulario = vinculos.Formulario(bloco.Alvo!);
+
+        Assert.Equal("Galena", bloco.Titulo);
+        Assert.Equal(criado.Id, bloco.Alvo!.VinculoId);
+        Assert.Equal(criado.Id, formulario.EmEdicao);
+        Assert.Equal("2200", formulario.Escritorio);
+        Assert.Equal(criado.CategoriaId, formulario.CategoriaId);
+        Assert.Equal(AlcanceDoVinculo.Janela, formulario.Alcance);
+        Assert.False(formulario.SoRegistro);
+        Assert.Equal(ValidadeDoVinculo.Prazo, formulario.Validade);
+        Assert.Equal(criado.Inicio, formulario.Inicio);
+        Assert.Equal(new TempoDeVinculo(OpcaoDeTempo.Outro, 1, false), formulario.Tempo);
+
+        var resultado = servico.SalvarVinculo(formulario.EmEdicao, new PedidoDeVinculo(
+            "1905",
+            null,
+            formulario.Alcance,
+            formulario.Alvo,
+            formulario.Validade,
+            formulario.Inicio,
+            TimeSpan.FromMinutes(1),
+            formulario.SoRegistro,
+            "Planilhas"));
+
+        Assert.Null(resultado.Aviso);
+        var unico = Assert.Single(vinculos.ListarVinculos());
+        Assert.Equal(criado with { Escritorio = "1905" }, unico);
+        Assert.Equal("Concha y Toro", Assert.Single(FaixasDeEscritorio(servico)).Titulo);
+        Assert.Single(repositorio.Listar());
+    }
+
+    [Fact]
+    public void Atalho_em_janela_com_vinculo_valendo_abre_esse_vinculo_e_salvar_altera_o_mesmo()
+    {
+        var (servico, vinculos, leitor, _, relogio) = Criar();
+        leitor.Proxima = new AmostraDeJanela("Excel", "custos.xlsx - Excel", false);
+        servico.Iniciar();
+        var alvo = servico.SegurarJanelaDaFrente(Janelinha)!;
+        var criado = servico.Vincular(new PedidoDeVinculo(
+            "2200",
+            null,
+            AlcanceDoVinculo.Janela,
+            alvo,
+            ValidadeDoVinculo.Inatividade,
+            relogio.Instante,
+            TimeSpan.FromHours(1),
+            NovaCategoria: "Planilhas")).Vinculo!;
+        servico.SoltarJanelaDaFrente();
+        Avancar(servico, relogio, 10);
+
+        var deNovo = servico.SegurarJanelaDaFrente(Janelinha)!;
+        var formulario = vinculos.Formulario(deNovo);
+
+        Assert.Null(alvo.VinculoId);
+        Assert.Equal(criado.Id, deNovo.VinculoId);
+        Assert.Null(deNovo.CopiarDe);
+        Assert.Equal(criado.Id, formulario.EmEdicao);
+        Assert.Equal("2200", formulario.Escritorio);
+        Assert.Equal(criado.CategoriaId, formulario.CategoriaId);
+        Assert.Equal(AlcanceDoVinculo.Janela, formulario.Alcance);
+        Assert.Equal(ValidadeDoVinculo.Inatividade, formulario.Validade);
+        Assert.Equal(new TempoDeVinculo(OpcaoDeTempo.UmaHora), formulario.Tempo);
+        Assert.Equal(criado.Inicio, formulario.Inicio);
+
+        servico.SalvarVinculo(formulario.EmEdicao, new PedidoDeVinculo(
+            formulario.Escritorio,
+            null,
+            formulario.Alcance,
+            formulario.Alvo,
+            ValidadeDoVinculo.Sempre,
+            formulario.Inicio,
+            null,
+            NovaCategoria: "Planilhas"));
+        servico.SoltarJanelaDaFrente();
+
+        var unico = Assert.Single(vinculos.ListarVinculos());
+        Assert.Equal(criado.Id, unico.Id);
+        Assert.Equal(ValidadeDoVinculo.Sempre, unico.Validade);
+        Assert.Equal(criado.Inicio, unico.Inicio);
+        Assert.Equal(criado.CriadoEm, unico.CriadoEm);
+    }
+
+    [Fact]
+    public void Atalho_no_programa_ou_na_aba_com_vinculo_abre_o_vinculo_que_esta_valendo()
+    {
+        var (servico, vinculos, leitor, _, relogio) = Criar();
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", "Sala - Google Chrome", false, "https://app.gather.town/app/sala?token=1");
+        servico.Iniciar();
+        var programa = vinculos.Criar(Pedido("1905", "Google Chrome") with { Inicio = relogio.Instante }).Vinculo!;
+        var sala = servico.SegurarJanelaDaFrente(Janelinha)!;
+        var aba = servico.Vincular(new PedidoDeVinculo("2200", null, AlcanceDoVinculo.Aba, sala, ValidadeDoVinculo.Sempre, relogio.Instante, null)).Vinculo!;
+        servico.SoltarJanelaDaFrente();
+
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", "Gmail - Google Chrome", false, "https://mail.google.com/mail/u/0/");
+        Avancar(servico, relogio, 5);
+        var noGmail = servico.SegurarJanelaDaFrente(Janelinha)!;
+        servico.SoltarJanelaDaFrente();
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", "Outro nome de sala - Google Chrome", false, "https://app.gather.town/app/sala");
+        Avancar(servico, relogio, 5);
+        var naSala = servico.SegurarJanelaDaFrente(Janelinha)!;
+        servico.SoltarJanelaDaFrente();
+
+        Assert.Equal(programa.Id, sala.VinculoId);
+        Assert.Equal(programa.Id, noGmail.VinculoId);
+        Assert.Equal(aba.Id, naSala.VinculoId);
+        Assert.Equal("1905", vinculos.Formulario(noGmail).Escritorio);
+        Assert.Equal(AlcanceDoVinculo.Programa, vinculos.Formulario(noGmail).Alcance);
+        Assert.Equal("2200", vinculos.Formulario(naSala).Escritorio);
+        Assert.Equal(AlcanceDoVinculo.Aba, vinculos.Formulario(naSala).Alcance);
+    }
+
+    [Fact]
+    public void Atalho_depois_que_o_vinculo_terminou_traz_os_campos_dele_e_salvar_cria_outro_sem_mexer_no_antigo()
+    {
+        var (servico, vinculos, leitor, _, relogio) = Criar();
+        leitor.Proxima = new AmostraDeJanela("Excel", "custos.xlsx - Excel", false);
+        servico.Iniciar();
+        var antigo = VincularPorUmMinuto(servico, relogio, "2200", "Planilhas");
+        Avancar(servico, relogio, 10);
+
+        var alvo = servico.SegurarJanelaDaFrente(Janelinha)!;
+        var formulario = vinculos.Formulario(alvo);
+
+        Assert.Null(alvo.VinculoId);
+        Assert.Equal(antigo.Id, alvo.CopiarDe);
+        Assert.Null(formulario.EmEdicao);
+        Assert.True(formulario.Copia);
+        Assert.Equal("2200", formulario.Escritorio);
+        Assert.Equal(antigo.CategoriaId, formulario.CategoriaId);
+        Assert.Equal(AlcanceDoVinculo.Janela, formulario.Alcance);
+        Assert.Equal(ValidadeDoVinculo.Prazo, formulario.Validade);
+        Assert.Equal(new TempoDeVinculo(OpcaoDeTempo.Outro, 1, false), formulario.Tempo);
+        Assert.Equal(relogio.Instante, formulario.Inicio);
+
+        var novo = servico.SalvarVinculo(formulario.EmEdicao, new PedidoDeVinculo(
+            formulario.Escritorio,
+            null,
+            formulario.Alcance,
+            formulario.Alvo,
+            formulario.Validade,
+            formulario.Inicio,
+            TimeSpan.FromMinutes(1),
+            NovaCategoria: "Planilhas")).Vinculo!;
+        servico.SoltarJanelaDaFrente();
+
+        var salvos = vinculos.ListarVinculos();
+        Assert.Equal(2, salvos.Count);
+        Assert.Contains(antigo, salvos);
+        Assert.NotEqual(antigo.Id, novo.Id);
+        Assert.Equal(relogio.Instante, novo.Inicio);
+    }
+
+    [Fact]
+    public void Atalho_em_janela_sem_vinculo_ou_com_escritorio_descoberto_abre_em_branco()
+    {
+        var (servico, vinculos, leitor, _, relogio) = Criar();
+        leitor.Proxima = new AmostraDeJanela("Excel", "custos.xlsx - Excel", false);
+        servico.Iniciar();
+        vinculos.Criar(Pedido("2200", "Excel") with { Inicio = relogio.Instante });
+        vinculos.Criar(Pedido("2200", "Google Chrome") with { Inicio = relogio.Instante });
+
+        leitor.Proxima = new AmostraDeJanela("Word", "Contrato - Word", false);
+        Avancar(servico, relogio, 1);
+        var semVinculo = servico.SegurarJanelaDaFrente(Janelinha)!;
+        servico.SoltarJanelaDaFrente();
+        leitor.Proxima = new AmostraDeJanela(
+            "Google Chrome",
+            "SplitC - Google Chrome",
+            false,
+            "https://app.splitc.com.br/planos/17927/tab/862247?officeId=1905&periodId=49797&tabSelector=source&pagina=0&coluna=bq4&linha=19&rowId=19");
+        Avancar(servico, relogio, 1);
+        var descoberto = servico.SegurarJanelaDaFrente(Janelinha)!;
+        servico.SoltarJanelaDaFrente();
+
+        Assert.Null(semVinculo.VinculoId);
+        Assert.Null(semVinculo.CopiarDe);
+        Assert.Null(vinculos.Formulario(semVinculo).EmEdicao);
+        Assert.Equal("", vinculos.Formulario(semVinculo).Escritorio);
+        Assert.True(descoberto.Descoberto);
+        Assert.Null(descoberto.VinculoId);
+        Assert.Null(vinculos.Formulario(descoberto).EmEdicao);
+    }
+
+    [Fact]
+    public void Criar_outro_vinculo_abre_em_branco_e_deixa_o_que_existe_como_esta()
+    {
+        var (servico, vinculos, leitor, _, relogio) = Criar();
+        leitor.Proxima = new AmostraDeJanela("Google Chrome", "Sala - Google Chrome", false, "https://app.gather.town/app/sala");
+        servico.Iniciar();
+        var programa = vinculos.Criar(Pedido("1905", "Google Chrome") with { Inicio = relogio.Instante }).Vinculo!;
+        Avancar(servico, relogio, 5);
+
+        var alvo = servico.SegurarJanelaDaFrente(Janelinha)!;
+        var emBranco = vinculos.FormularioNovo(alvo);
+        var aba = servico.SalvarVinculo(emBranco.EmEdicao, new PedidoDeVinculo(
+            "2200",
+            null,
+            emBranco.Alcance,
+            emBranco.Alvo,
+            emBranco.Validade,
+            emBranco.Inicio,
+            null)).Vinculo!;
+        servico.SoltarJanelaDaFrente();
+
+        Assert.Equal(programa.Id, alvo.VinculoId);
+        Assert.Null(emBranco.EmEdicao);
+        Assert.Equal("", emBranco.Escritorio);
+        Assert.Equal(AlcanceDoVinculo.Aba, emBranco.Alcance);
+        Assert.Equal([programa, aba], vinculos.ListarVinculos().OrderBy(item => item.Id).ToArray());
+        Assert.Equal(aba.Id, servico.SegurarJanelaDaFrente(Janelinha)!.VinculoId);
+    }
+
+    private static VinculoDeEscritorio VincularPorUmMinuto(
+        ServicoDeEsforco servico,
+        RelogioManual relogio,
+        string escritorio,
+        string categoria)
+    {
+        var alvo = servico.SegurarJanelaDaFrente(Janelinha)!;
+        var criado = servico.Vincular(new PedidoDeVinculo(
+            escritorio,
+            null,
+            AlcanceDoVinculo.Janela,
+            alvo,
+            ValidadeDoVinculo.Prazo,
+            relogio.Instante,
+            TimeSpan.FromMinutes(1),
+            NovaCategoria: categoria)).Vinculo!;
+        servico.SoltarJanelaDaFrente();
+        return criado;
+    }
+
+    private static IReadOnlyList<BlocoDeCalendario> FaixasDeEscritorio(ServicoDeEsforco servico)
+    {
+        var dia = new DateTime(2026, 11, 17);
+        var quadro = servico.ConsultarCalendario(dia, dia, ModoDoCalendario.Escritorios, emGrade: false, deDomingoASabado: false);
+        return Assert.Single(quadro.Dias).Blocos;
+    }
+
     /// <summary>
     /// Passa o tempo com um pulso a cada dez segundos, como o programa faz. Um salto maior seria lido como ausência.
     /// </summary>

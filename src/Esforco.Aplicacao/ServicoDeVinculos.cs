@@ -43,6 +43,19 @@ public sealed class ServicoDeVinculos
 
     public IReadOnlyList<VinculoDeEscritorio> ListarVinculos() => Contexto().Vinculos;
 
+    /// <summary>
+    /// Como a janelinha abre para a janela da frente ou para a faixa do calendário:
+    /// com o vínculo que o alvo já tem, ou em branco.
+    /// </summary>
+    public FormularioDeVinculo Formulario(AlvoDeVinculo alvo, AlcanceDoVinculo? sugerido = null) =>
+        FormularioDeVinculo.Montar(alvo, Contexto().Vinculos, _relogio.Agora(), sugerido);
+
+    /// <summary>
+    /// A janelinha em branco para o mesmo alvo, quando a pessoa quer outro vínculo em vez de alterar o que existe.
+    /// </summary>
+    public FormularioDeVinculo FormularioNovo(AlvoDeVinculo alvo, AlcanceDoVinculo? sugerido = null) =>
+        FormularioDeVinculo.Novo(alvo, _relogio.Agora(), sugerido);
+
     public ResultadoDeCategoria CriarCategoria(string? nome)
     {
         lock (_gate)
