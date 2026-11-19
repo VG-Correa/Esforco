@@ -49,10 +49,71 @@ public static class InterpretadorDeReuniao
         if (string.IsNullOrWhiteSpace(titulo))
             return false;
 
-        var texto = titulo.Trim()
+        var texto = SemNavegador(titulo);
+        return texto.Equals("Meet", StringComparison.OrdinalIgnoreCase)
+            || texto.StartsWith("Meet:", StringComparison.OrdinalIgnoreCase)
+            || texto.StartsWith("Meet -", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A tela do Meet antes de mostrar o nome da reunião: "Meet" ou "Meet: código".
+    /// </summary>
+    public static bool EhTelaDoMeetSemNome(string? titulo) =>
+        Ler(titulo) is null && PareceJanelaDoMeet(titulo);
+
+    /// <summary>
+    /// O título tem nome de reunião e vem de um programa de chamada. Uma página que só cita a reunião,
+    /// como o relatório dela, tem o nome mas não é a chamada.
+    /// </summary>
+    public static bool EhChamada(string? titulo)
+    {
+        if (Ler(titulo) is null)
+            return false;
+
+        var texto = Padronizar(titulo!);
+        if (Prefixos.Any(prefixo => texto.StartsWith(prefixo, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return MarcasDeChamada.Any(marca => TemTrecho(texto, marca));
+    }
+
+    private static readonly string[] MarcasDeChamada = ["Google Meet", "Meet", "Microsoft Teams", "Zoom"];
+
+    /// <summary>
+    /// O nome do programa só vale quando é um trecho inteiro do título, separado por " - " ou " | ".
+    /// </summary>
+    private static bool TemTrecho(string texto, string trecho)
+    {
+        var inicio = 0;
+        while (inicio < texto.Length)
+        {
+            var achou = texto.IndexOf(trecho, inicio, StringComparison.OrdinalIgnoreCase);
+            if (achou < 0)
+                return false;
+
+            var fim = achou + trecho.Length;
+            var antes = texto[..achou];
+            var depois = texto[fim..];
+            var abre = achou == 0 || antes.EndsWith(" - ", StringComparison.Ordinal) || antes.EndsWith(" | ", StringComparison.Ordinal);
+            var fecha = depois.Length == 0 || depois.StartsWith(" - ", StringComparison.Ordinal) || depois.StartsWith(" | ", StringComparison.Ordinal);
+            if (abre && fecha)
+                return true;
+
+            inicio = fim;
+        }
+
+        return false;
+    }
+
+    private static string Padronizar(string titulo) =>
+        titulo.Trim()
             .Replace(" — ", " - ", StringComparison.Ordinal)
             .Replace(" – ", " - ", StringComparison.Ordinal)
             .Replace(" • ", " - ", StringComparison.Ordinal);
+
+    private static string SemNavegador(string titulo)
+    {
+        var texto = Padronizar(titulo);
         var mudou = true;
         while (mudou)
         {
@@ -68,9 +129,7 @@ public static class InterpretadorDeReuniao
             }
         }
 
-        return texto.Equals("Meet", StringComparison.OrdinalIgnoreCase)
-            || texto.StartsWith("Meet:", StringComparison.OrdinalIgnoreCase)
-            || texto.StartsWith("Meet -", StringComparison.OrdinalIgnoreCase);
+        return texto;
     }
 
     public static bool Mesma(string? titulo, string? outro)

@@ -14,12 +14,20 @@ public enum AlcanceDaContagem
 
 /// <summary>
 /// Uma janela que existe agora, na frente ou não. Navegador diz que ela pode esconder abas.
+/// Abas traz os nomes das abas dela quando foram lidos; nulo quando não foram.
+/// PodeFaltarAba avisa que a lista lida pode não trazer todas, como quando há grupo de abas recolhido.
 /// </summary>
-public sealed record JanelaAberta(string Programa, string Titulo, bool Minimizada, bool Navegador = false);
+public sealed record JanelaAberta(
+    string Programa,
+    string Titulo,
+    bool Minimizada,
+    bool Navegador = false,
+    IReadOnlyList<string>? Abas = null,
+    bool PodeFaltarAba = false);
 
 /// <summary>
 /// Como o tempo de uma janela, ou de um programa inteiro, é contado daqui para a frente.
-/// Sem regra, a reunião conta enquanto está aberta e o resto conta só em foco.
+/// Sem regra, a chamada de reunião conta enquanto está aberta e o resto conta só em foco.
 /// </summary>
 public sealed record ContagemDeJanela(
     long Id,
@@ -51,7 +59,7 @@ public sealed record PlanoDeContagem(AcaoDeContagem Acao, ContagemDeJanela? Regr
 public static class ContagemDaJanela
 {
     public static ModoDeContagem Padrao(string? titulo) =>
-        InterpretadorDeReuniao.Ler(titulo) is null ? ModoDeContagem.SoEmFoco : ModoDeContagem.EnquantoAberta;
+        InterpretadorDeReuniao.EhChamada(titulo) ? ModoDeContagem.EnquantoAberta : ModoDeContagem.SoEmFoco;
 
     /// <summary>
     /// A regra da janela vale mais que a do programa, e a do programa vale mais que o padrão.
@@ -149,7 +157,7 @@ public sealed record FormularioDeContagem(
 {
     public bool PodeJanela => Titulo.Trim().Length > 0;
 
-    public bool Reuniao => InterpretadorDeReuniao.Ler(Titulo) is not null;
+    public bool Reuniao => InterpretadorDeReuniao.EhChamada(Titulo);
 
     /// <summary>
     /// O que está salvo para o alcance, para a janelinha mostrar quando a pessoa troca de alcance.

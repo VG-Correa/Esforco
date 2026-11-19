@@ -24,12 +24,18 @@ public sealed class LeitorDeJanelaUser32 : ILeitorDeJanelaDaFrente
 
     private readonly ILeitorDeEnderecoDoNavegador _enderecos;
     private readonly ILeitorDeConversaDoNavegador _conversas;
+    private readonly ILeitorDeAbasDoNavegador _abas;
     private readonly Dictionary<int, (string Amigavel, string Processo)> _programas = new();
+    private static readonly TimeSpan LimiteDasAbas = TimeSpan.FromSeconds(3);
 
-    public LeitorDeJanelaUser32(ILeitorDeEnderecoDoNavegador enderecos, ILeitorDeConversaDoNavegador conversas)
+    public LeitorDeJanelaUser32(
+        ILeitorDeEnderecoDoNavegador enderecos,
+        ILeitorDeConversaDoNavegador conversas,
+        ILeitorDeAbasDoNavegador abas)
     {
         _enderecos = enderecos;
         _conversas = conversas;
+        _abas = abas;
     }
 
     public AmostraDeJanela? Ler()
@@ -111,11 +117,36 @@ public sealed class LeitorDeJanelaUser32 : ILeitorDeJanelaDaFrente
     /// <summary>
     /// Lista as janelas visíveis com título, de qualquer programa menos o Esforço. Minimizada conta
     /// como aberta. Usa as mesmas consultas da leitura da reunião minimizada: nada é enviado para as janelas.
+    /// Com abas, cada janela de navegador traz os nomes das abas, lidos como a barra de endereço é lida.
     /// </summary>
-    public IReadOnlyList<JanelaAberta> LerAbertas()
+    public IReadOnlyList<JanelaAberta> LerAbertas(bool comAbas)
     {
         var lista = new List<JanelaAberta>();
+        var janelas = new List<IntPtr>();
         Native.EnumWindows(Visitar, IntPtr.Zero);
+        if (!comAbas)
+            return lista;
+
+        var relogio = Stopwatch.StartNew();
+        for (var i = 0; i < lista.Count; i++)
+        {
+            if (!lista[i].Navegador || relogio.Elapsed > LimiteDasAbas)
+                continue;
+
+            AbasLidas? abas;
+            try
+            {
+                abas = _abas.Ler(janelas[i]);
+            }
+            catch (Exception)
+            {
+                abas = null;
+            }
+
+            if (abas is not null)
+                lista[i] = lista[i] with { Abas = abas.Nomes, PodeFaltarAba = !abas.Completa };
+        }
+
         return lista;
 
         bool Visitar(IntPtr janela, IntPtr parametro)
@@ -136,6 +167,7 @@ public sealed class LeitorDeJanelaUser32 : ILeitorDeJanelaDaFrente
 
             var (amigavel, processo) = Nomes((int)pid);
             lista.Add(new JanelaAberta(amigavel, titulo, Native.IsIconic(janela), Navegadores.Contains(processo)));
+            janelas.Add(janela);
             return true;
         }
     }

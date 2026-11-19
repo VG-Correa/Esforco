@@ -432,6 +432,7 @@ public class ContagemEnquantoAbertaTestes
         vinculos.SalvarContagem("Google Chrome", Reuniao, AlcanceDaContagem.Janela, ModoDeContagem.SoEmFoco);
         Assert.True(vinculos.SalvarContagem("Google Chrome", Reuniao, AlcanceDaContagem.Janela, ModoDeContagem.EnquantoAberta));
         leitor.Proxima = new AmostraDeJanela("Google Chrome", Reuniao, false);
+        leitor.Abertas.Add(new JanelaAberta("Google Chrome", Reuniao, false, Navegador: true));
         servico.Iniciar();
         Passar(servico, relogio, 1);
         leitor.Proxima = Word;

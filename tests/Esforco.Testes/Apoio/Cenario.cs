@@ -36,12 +36,19 @@ internal sealed class LeitorFalso : ILeitorDeJanelaDaFrente
 
     public Exception? FalhaNasAbertas { get; set; }
 
-    public IReadOnlyList<JanelaAberta> LerAbertas()
+    public int LeiturasDeAbas { get; private set; }
+
+    /// <summary>
+    /// Como o leitor de verdade: as abas só vêm quando são pedidas.
+    /// </summary>
+    public IReadOnlyList<JanelaAberta> LerAbertas(bool comAbas)
     {
         LeiturasDeAbertas++;
+        if (comAbas)
+            LeiturasDeAbas++;
         if (FalhaNasAbertas is not null)
             throw FalhaNasAbertas;
-        return Abertas.ToList();
+        return comAbas ? Abertas.ToList() : Abertas.Select(janela => janela with { Abas = null }).ToList();
     }
 }
 

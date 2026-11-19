@@ -32,6 +32,7 @@ public partial class App : Application
             builder.Services.AddSingleton<IRelogio, RelogioDoSistema>();
             builder.Services.AddSingleton<ILeitorDeEnderecoDoNavegador, LeitorDeEnderecoDaBarra>();
             builder.Services.AddSingleton<ILeitorDeConversaDoNavegador, LeitorDeConversaDoChatwoot>();
+            builder.Services.AddSingleton<ILeitorDeAbasDoNavegador, LeitorDeAbasDoNavegador>();
             builder.Services.AddSingleton<ILeitorDeJanelaDaFrente, LeitorDeJanelaUser32>();
             builder.Services.AddSingleton<IFonteDeRegrasDeEscritorio>(_ =>
                 new FonteDeRegrasDeEscritorioJson(FonteDeRegrasDeEscritorioJson.CaminhoAoLadoDoExecutavel()));

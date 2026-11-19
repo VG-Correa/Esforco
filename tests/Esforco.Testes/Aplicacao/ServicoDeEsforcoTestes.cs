@@ -434,11 +434,17 @@ public class ServicoDeEsforcoTestes
         servico.Iniciar();
         PassarTempo(servico, relogio, TimeSpan.FromMinutes(6));
         leitor.Proxima = new AmostraDeJanela("Google Chrome", "SplitC", false, Enderecos.Fontes);
+        leitor.Abertas.Add(new JanelaAberta(
+            "Google Chrome",
+            "SplitC",
+            false,
+            Navegador: true,
+            Abas: ["Meet - NTM <> SplitC - Alinhamento", "SplitC"]));
         servico.Pulso();
         PassarTempo(servico, relogio, TimeSpan.FromMinutes(4));
         leitor.Proxima = new AmostraDeJanela(
             "Google Chrome",
-            "NTM Sul <> SplitC - Daily - Google Chrome",
+            "Meet - NTM Sul <> SplitC - Daily - Google Chrome",
             false);
         servico.Pulso();
         PassarTempo(servico, relogio, TimeSpan.FromMinutes(3));
@@ -519,12 +525,17 @@ public class ServicoDeEsforcoTestes
 
         PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
         var ultimaVista = relogio.Instante;
+
+        // Outra aba tomou a frente no navegador e as abas não puderam ser lidas: vale a folga de uma hora.
+        leitor.Abertas.Add(new JanelaAberta("Google Chrome", "Gmail - Google Chrome", false, Navegador: true));
         leitor.Proxima = new AmostraDeJanela("Discord", "amigos - Discord", false);
         servico.Pulso();
         Assert.Equal(id, repositorio.ObterReuniaoEmSegundoPlano()!.Id);
         Assert.Null(repositorio.ObterReuniaoEmSegundoPlano()!.Fim);
 
-        PassarTempo(servico, relogio, ContinuidadeDeReuniao.Folga.Add(TimeSpan.FromMinutes(1)));
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(50));
+        Assert.Null(repositorio.ObterReuniaoEmSegundoPlano()!.Fim);
+        PassarTempo(servico, relogio, TimeSpan.FromMinutes(11));
         var encerrada = Assert.Single(repositorio.Listar(), item => item.Id == id);
         Assert.Equal(ultimaVista, encerrada.Fim);
         Assert.Null(repositorio.ObterReuniaoEmSegundoPlano());
@@ -537,6 +548,7 @@ public class ServicoDeEsforcoTestes
         var titulo = "Meet: vct <> splitc - Google Chrome";
         servico.AlternarPausado("Esforço");
         leitor.Proxima = new AmostraDeJanela("Google Chrome", titulo, false);
+        leitor.Abertas.Add(new JanelaAberta("Google Chrome", titulo, false, Navegador: true));
         servico.Iniciar();
         var id = Assert.Single(repositorio.Listar()).Id;
 
@@ -565,6 +577,7 @@ public class ServicoDeEsforcoTestes
         var (servico, leitor, repositorio, relogio, _) = Cenario.Criar();
         var titulo = "Meet: vct <> splitc - Google Chrome";
         leitor.Proxima = new AmostraDeJanela("Google Chrome", titulo, false);
+        leitor.Abertas.Add(new JanelaAberta("Google Chrome", titulo, false, Navegador: true));
         servico.Iniciar();
         PassarTempo(servico, relogio, TimeSpan.FromMinutes(1));
         leitor.Proxima = new AmostraDeJanela("Word", "notas.docx - Word", false);

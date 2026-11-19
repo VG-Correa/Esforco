@@ -12,7 +12,6 @@ public sealed partial class ServicoDeEsforco
     private readonly object _gate = new();
     public static readonly TimeSpan FolgaDeAusencia = TimeSpan.FromSeconds(15);
 
-    private DateTimeOffset? _ultimaVistaDaReuniao;
     private DateTimeOffset? _ultimoPulso;
     private Dictionary<string, PreferenciaDePrograma>? _preferencias;
     private int _ocupado;
@@ -101,12 +100,18 @@ public sealed partial class ServicoDeEsforco
 
         try
         {
+            bool contaSemFoco;
+            bool comAbas;
             lock (_gate)
             {
                 if (!_emLeitura || _suspenso)
                     return;
 
-                CortarSeHouveAusencia(_relogio.Agora());
+                var antes = _relogio.Agora();
+                CortarSeHouveAusencia(antes);
+                contaSemFoco = _contaSemFoco;
+                comAbas = _procurarNasAbas
+                    && (_abasLidasEm is not DateTimeOffset lidas || antes - lidas >= AbasDoNavegador.Intervalo);
             }
 
             AmostraDeJanela? amostra;
@@ -130,11 +135,11 @@ public sealed partial class ServicoDeEsforco
             }
 
             IReadOnlyList<JanelaAberta>? abertas = null;
-            if (HaJanelaQueContaAberta())
+            if (contaSemFoco || HaJanelaQueContaAberta())
             {
                 try
                 {
-                    abertas = _leitor.LerAbertas();
+                    abertas = _leitor.LerAbertas(comAbas);
                 }
                 catch (Exception)
                 {
@@ -173,8 +178,13 @@ public sealed partial class ServicoDeEsforco
 
                 var regras = RegrasDeContagem();
                 var frente = new Frente(nome, titulo, endereco, conversa, amostra.Minimizada, local, pausado);
-                RegistrarFrente(frente, reuniaoMinimizada, regras, agora);
-                AcompanharAbertas(regras, abertas, (amostra.Programa ?? "").Trim(), titulo, agora);
+                var existentes = abertas is null ? null : new Existentes(abertas, comAbas);
+                if (existentes is { ComAbas: true })
+                    _abasLidasEm = agora;
+                _procurarNasAbas = false;
+                RegistrarFrente(frente, reuniaoMinimizada, existentes, regras, agora);
+                AcompanharAbertas(regras, existentes, (amostra.Programa ?? "").Trim(), titulo, agora);
+                _contaSemFoco = _repositorio.ListarEmSegundoPlano().Count > 0;
             }
         }
         finally
@@ -186,6 +196,7 @@ public sealed partial class ServicoDeEsforco
     private void RegistrarFrente(
         Frente frente,
         AmostraDeJanela? reuniaoMinimizada,
+        Existentes? existentes,
         IReadOnlyList<ContagemDeJanela> regras,
         DateTimeOffset agora)
     {
@@ -193,25 +204,30 @@ public sealed partial class ServicoDeEsforco
         // mas o que conta enquanto aberto segue contando atrás dele.
         var titulo = frente.Pausado ? "" : frente.Titulo;
         var reuniao = ReuniaoAberta(regras);
-        var viu = ViuReuniao(reuniao, titulo, reuniaoMinimizada);
+        var viu = ViuReuniao(reuniao, titulo, reuniaoMinimizada, existentes);
         if (reuniao is not null && !viu)
         {
-            var vista = _ultimaVistaDaReuniao ?? reuniao.Inicio;
+            // Nenhuma janela mostra a reunião no título. A aba dela pode estar atrás de outra aba
+            // ou ter sido fechada: quem diz é a lista de abas das janelas de navegador.
+            var vista = UltimaVista(reuniao);
             var outra = OutraReuniao(reuniao, titulo);
-            if (outra || agora - vista > ContinuidadeDeReuniao.Folga)
+            var presenca = outra ? null : NasAbas(reuniao, reuniao.Titulo, existentes, janela => janela.Navegador, agora);
+            if (presenca == PresencaDeAba.Aberta)
             {
-                Fechar(reuniao, outra ? agora : vista);
+                viu = true;
+            }
+            else if (outra || Sumiu(reuniao, presenca, vista, agora))
+            {
+                Fechar(reuniao, outra ? FimSemFoco(reuniao, agora) : vista);
                 reuniao = null;
-                if (!outra)
-                    _ultimaVistaDaReuniao = null;
             }
         }
 
-        if (reuniao is not null && viu)
+        if (reuniao is not null && viu && reuniao.Id is long idVisto)
         {
-            _ultimaVistaDaReuniao = agora;
-            if (reuniao.Id is long idVisto)
-                _repositorio.MarcarVisto(idVisto, agora);
+            _repositorio.MarcarVisto(idVisto, agora);
+            _vistas[idVisto] = agora;
+            _sumidas.Remove(idVisto);
         }
 
         if (reuniao is not null && FrenteMantemReuniao(reuniao, titulo))
@@ -282,8 +298,6 @@ public sealed partial class ServicoDeEsforco
             _vistas[criado] = agora;
         if (frente.Local is null && frente.Endereco.Length > 0)
             _vinculos?.GuardarEnderecoSeVinculado(novo, frente.Endereco);
-        if (ehReuniao)
-            _ultimaVistaDaReuniao = agora;
     }
 
     public void AlternarOculto(string programa) =>
@@ -511,7 +525,7 @@ public sealed partial class ServicoDeEsforco
         foreach (var fundo in _repositorio.ListarEmSegundoPlano())
         {
             if (string.Equals(fundo.Programa, programa, StringComparison.Ordinal))
-                Fechar(fundo, agora);
+                Fechar(fundo, FimSemFoco(fundo, agora));
         }
     }
 
@@ -620,26 +634,36 @@ public sealed partial class ServicoDeEsforco
         return aberto is not null && ReuniaoQueContaAberta(aberto, regras) ? aberto : null;
     }
 
-    private static bool ViuReuniao(IntervaloDeEsforco? reuniao, string titulo, AmostraDeJanela? minimizada)
+    private static bool ViuReuniao(
+        IntervaloDeEsforco? reuniao,
+        string titulo,
+        AmostraDeJanela? minimizada,
+        Existentes? existentes)
     {
         if (reuniao is null)
             return false;
 
-        if (InterpretadorDeReuniao.Mesma(reuniao.Titulo, titulo))
+        if (FrenteMantemReuniao(reuniao, titulo))
             return true;
 
         if (minimizada is not null && InterpretadorDeReuniao.Mesma(reuniao.Titulo, minimizada.Titulo))
             return true;
 
-        return InterpretadorDeReuniao.PareceJanelaDoMeet(titulo) && !OutraReuniao(reuniao, titulo);
+        // A reunião à mostra em outra janela, sem foco e sem estar minimizada, também está aberta.
+        return existentes is not null
+            && existentes.Janelas.Any(janela => InterpretadorDeReuniao.Mesma(reuniao.Titulo, janela.Titulo));
     }
 
     private static bool FrenteMantemReuniao(IntervaloDeEsforco reuniao, string titulo) =>
         InterpretadorDeReuniao.Mesma(reuniao.Titulo, titulo)
-        || (InterpretadorDeReuniao.PareceJanelaDoMeet(titulo) && !OutraReuniao(reuniao, titulo));
+        || InterpretadorDeReuniao.EhTelaDoMeetSemNome(titulo);
 
+    /// <summary>
+    /// Só outra chamada encerra a reunião que conta. A página que cita uma reunião, como o relatório dela,
+    /// é uma página comum: a reunião segue contando atrás.
+    /// </summary>
     private static bool OutraReuniao(IntervaloDeEsforco reuniao, string titulo) =>
-        InterpretadorDeReuniao.Ler(titulo) is not null
+        InterpretadorDeReuniao.EhChamada(titulo)
         && !InterpretadorDeReuniao.Mesma(reuniao.Titulo, titulo);
 
     private void CortarSeHouveAusencia(DateTimeOffset agora)
@@ -666,7 +690,10 @@ public sealed partial class ServicoDeEsforco
     private void FecharSegundoPlano(DateTimeOffset agora)
     {
         foreach (var fundo in _repositorio.ListarEmSegundoPlano())
-            Fechar(fundo, agora);
+            Fechar(fundo, FimSemFoco(fundo, agora));
+
+        _contaSemFoco = false;
+        _procurarNasAbas = false;
     }
 
     private void Fechar(IntervaloDeEsforco intervalo, DateTimeOffset agora)
@@ -674,6 +701,9 @@ public sealed partial class ServicoDeEsforco
         intervalo.Fechar(agora);
         _repositorio.SalvarFechamento(intervalo);
         if (intervalo.Id is long id)
+        {
             _vistas.Remove(id);
+            _sumidas.Remove(id);
+        }
     }
 }

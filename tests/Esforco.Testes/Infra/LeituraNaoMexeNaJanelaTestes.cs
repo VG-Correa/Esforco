@@ -57,6 +57,36 @@ public class LeituraNaoMexeNaJanelaTestes
         Assert.Equal("LeitorDeJanelaUser32.cs", Path.GetFileName(arquivo));
     }
 
+    [Fact]
+    public void Quem_le_a_tela_de_outro_programa_so_consulta()
+    {
+        string[] acoes =
+        [
+            "Expand", "Collapse", "Invoke", "SetFocus", "SetValue", "Select", "AddToSelection", "RemoveFromSelection",
+            "Toggle", "Close", "Scroll", "ScrollIntoView", "SetScrollPercent", "Move", "Resize", "Rotate",
+            "SetWindowVisualState", "SetDockPosition", "WaitForInputIdle",
+        ];
+        var gerados = Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar;
+        var leitores = ArquivosDeCodigo()
+            .Where(arquivo => !arquivo.Contains(gerados, StringComparison.OrdinalIgnoreCase))
+            .Where(arquivo => File.ReadAllText(arquivo).Contains("System.Windows.Automation", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal(
+            ["LeitorDeAbasDoNavegador.cs", "LeitorDeConversaDoChatwoot.cs", "LeitorDeEnderecoDaBarra.cs"],
+            leitores.Select(arquivo => Path.GetFileName(arquivo)).Order());
+        foreach (var arquivo in leitores)
+        {
+            var texto = File.ReadAllText(arquivo);
+            foreach (var acao in acoes)
+            {
+                Assert.False(
+                    Regex.IsMatch(texto, $@"\.{acao}\s*\("),
+                    $"{Path.GetFileName(arquivo)} chama {acao}.");
+            }
+        }
+    }
+
     private static IReadOnlyList<string> ArquivosDeCodigo()
     {
         var pasta = new DirectoryInfo(AppContext.BaseDirectory);

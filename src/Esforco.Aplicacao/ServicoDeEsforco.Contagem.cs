@@ -6,10 +6,22 @@ namespace Esforco.Aplicacao;
 /// A janela que conta enquanto estiver aberta segue a regra da reunião: sai da frente e continua
 /// no mesmo registro, sem foco ou minimizada, e fecha quando a janela some, a leitura para,
 /// o computador dorme ou a tela é bloqueada. Saber se está aberta é só consulta.
+/// A aba de navegador que não está à mostra é procurada na lista de abas das janelas:
+/// se está lá, segue contando; se saiu de lá, foi fechada e o registro termina onde foi visto.
 /// </summary>
 public sealed partial class ServicoDeEsforco
 {
     private readonly Dictionary<long, DateTimeOffset> _vistas = new();
+
+    /// <summary>
+    /// Registros que as leituras das abas vêm dando como fechados, com o instante da primeira delas.
+    /// </summary>
+    private readonly Dictionary<long, DateTimeOffset> _sumidas = new();
+    private bool _contaSemFoco;
+    private bool _procurarNasAbas;
+    private DateTimeOffset? _abasLidasEm;
+
+    private sealed record Existentes(IReadOnlyList<JanelaAberta> Janelas, bool ComAbas);
 
     private sealed record Frente(
         string Programa,
@@ -104,11 +116,12 @@ public sealed partial class ServicoDeEsforco
     /// </summary>
     private void AcompanharAbertas(
         IReadOnlyList<ContagemDeJanela> regras,
-        IReadOnlyList<JanelaAberta>? abertas,
+        Existentes? existentes,
         string programaDaFrente,
         string tituloDaFrente,
         DateTimeOffset agora)
     {
+        var abertas = existentes?.Janelas;
         var fundos = _repositorio.ListarEmSegundoPlano();
         if (fundos.Count == 0 && (abertas is null || regras.Count == 0))
             return;
@@ -133,21 +146,32 @@ public sealed partial class ServicoDeEsforco
             if (abertas is null)
                 continue;
 
-            if (EstaAberta(fundo, regra, abertas))
+            // Fora do navegador, a janela que não aparece mais foi fechada. No navegador a aba pode
+            // estar atrás de outra: a lista de abas diz se ela existe. Sem a lista, vale a folga da reunião.
+            var vista = UltimaVista(fundo);
+            var aberta = EstaAberta(fundo, regra, abertas);
+            if (!aberta && !PodeEstarEscondida(fundo, abertas))
+            {
+                Fechar(fundo, vista);
+                continue;
+            }
+
+            var presenca = aberta
+                ? PresencaDeAba.Aberta
+                : NasAbas(fundo, TituloNasAbas(fundo, regra), existentes, PodeEsconder(fundo), agora);
+            if (presenca == PresencaDeAba.Aberta)
             {
                 if (fundo.Id is long id)
                 {
                     _repositorio.MarcarVisto(id, agora);
                     _vistas[id] = agora;
+                    _sumidas.Remove(id);
                 }
 
                 continue;
             }
 
-            // Aba de navegador pode estar atrás de outra aba: vale a mesma folga da reunião.
-            // Fora do navegador, a janela que não aparece mais foi fechada.
-            var vista = UltimaVista(fundo);
-            if (!PodeEstarEscondida(fundo, abertas) || agora - vista > ContinuidadeDeReuniao.Folga)
+            if (Sumiu(fundo, presenca, vista, agora))
                 Fechar(fundo, vista);
         }
 
@@ -203,12 +227,95 @@ public sealed partial class ServicoDeEsforco
         });
     }
 
-    private static bool PodeEstarEscondida(IntervaloDeEsforco fundo, IReadOnlyList<JanelaAberta> abertas)
+    private static bool PodeEstarEscondida(IntervaloDeEsforco fundo, IReadOnlyList<JanelaAberta> abertas) =>
+        abertas.Any(PodeEsconder(fundo));
+
+    /// <summary>
+    /// As janelas em que a aba do registro pode estar atrás de outra aba.
+    /// </summary>
+    private static Func<JanelaAberta, bool> PodeEsconder(IntervaloDeEsforco fundo)
     {
         if (fundo.EhPainelSplitC || fundo.EhChatwoot)
-            return abertas.Any(janela => janela.Navegador);
+            return janela => janela.Navegador;
 
-        return abertas.Any(janela => janela.Navegador && ContagemDaJanela.Igual(janela.Programa, fundo.Programa));
+        return janela => janela.Navegador && ContagemDaJanela.Igual(janela.Programa, fundo.Programa);
+    }
+
+    /// <summary>
+    /// O texto que identifica o registro no nome de uma aba. Na regra do programa inteiro,
+    /// qualquer aba do painel ou do Chatwoot serve, e elas são reconhecidas pelo nome do sistema.
+    /// </summary>
+    private static string TituloNasAbas(IntervaloDeEsforco fundo, ContagemDeJanela regra)
+    {
+        if (regra.Alcance != AlcanceDaContagem.Programa)
+            return fundo.Titulo;
+
+        if (fundo.EhChatwoot)
+            return "Chatwoot";
+
+        return fundo.EhPainelSplitC ? "SplitC" : fundo.Titulo;
+    }
+
+    /// <summary>
+    /// Procura o registro nas abas das janelas. Nulo quando as abas não foram lidas neste pulso:
+    /// aí vale o que a última leitura disse.
+    /// </summary>
+    private PresencaDeAba? NasAbas(
+        IntervaloDeEsforco fundo,
+        string titulo,
+        Existentes? existentes,
+        Func<JanelaAberta, bool> podeEsconder,
+        DateTimeOffset agora)
+    {
+        if (existentes is null)
+            return null;
+
+        var janelas = existentes.Janelas.Where(podeEsconder).ToList();
+        if (janelas.Count > 0)
+        {
+            _procurarNasAbas = true;
+            if (!existentes.ComAbas)
+                return null;
+        }
+
+        var presenca = AbasDoNavegador.Procurar(titulo, janelas);
+        if (fundo.Id is long id)
+        {
+            if (presenca == PresencaDeAba.Fechada)
+                _sumidas.TryAdd(id, agora);
+            else
+                _sumidas.Remove(id);
+        }
+
+        return presenca;
+    }
+
+    private bool EstaSumida(IntervaloDeEsforco fundo) => fundo.Id is long id && _sumidas.ContainsKey(id);
+
+    /// <summary>
+    /// Fechada nas abas, encerra quando as leituras dizem isso há mais tempo que a tolerância:
+    /// uma leitura só não encerra nada. Sem saber das abas, espera a folga da reunião desde a última
+    /// vez em que foi visto.
+    /// </summary>
+    private bool Sumiu(IntervaloDeEsforco fundo, PresencaDeAba? presenca, DateTimeOffset vista, DateTimeOffset agora)
+    {
+        if (fundo.Id is long id && _sumidas.TryGetValue(id, out var desde))
+            return presenca == PresencaDeAba.Fechada && agora - desde >= AbasDoNavegador.Tolerancia;
+
+        return agora - vista > ContinuidadeDeReuniao.Folga;
+    }
+
+    /// <summary>
+    /// Quando a leitura para, a tela é bloqueada ou outra reunião entra, o que conta sem foco termina agora.
+    /// O que já não aparecia em aba nenhuma termina onde foi visto pela última vez.
+    /// </summary>
+    private DateTimeOffset FimSemFoco(IntervaloDeEsforco fundo, DateTimeOffset agora)
+    {
+        if (!EstaSumida(fundo))
+            return agora;
+
+        var vista = UltimaVista(fundo);
+        return vista < agora ? vista : agora;
     }
 
     private bool ContaPelaRegra(JanelaAberta janela, ContagemDeJanela regra, IReadOnlyList<ContagemDeJanela> regras)
